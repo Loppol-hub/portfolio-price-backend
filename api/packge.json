@@ -1,0 +1,9 @@
+{
+  "name": "portfolio-price-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless function that fetches stock/crypto prices for the portfolio tracker app.",
+  "engines": {
+    "node": ">=18"
+  }
+}
