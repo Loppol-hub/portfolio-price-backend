@@ -47,21 +47,39 @@ async function getPrice({ ticker, market }) {
   if (!ticker) throw new Error('ไม่มีสัญลักษณ์ (ticker)');
   if (market === 'th') return getThaiPrice(ticker);
   if (market === 'crypto') return getFinnhubPrice(normalizeCrypto(ticker));
-  return getFinnhubPrice(ticker); // default: 'us' / foreign stock
+  return getFinnhubPrice(ticker.toUpperCase().trim()); // default: 'us' / foreign stock — Finnhub is case-sensitive
 }
 
-// --- USD/THB exchange rate (Finnhub forex quote) ---
+// --- USD/THB exchange rate ---
+// Primary source: Frankfurter (ECB reference rates) — free, no API key needed, CORS-enabled.
+// Falls back to Finnhub's forex quote if Frankfurter is unreachable and a Finnhub key is set.
 async function getFxRate() {
-  const key = process.env.FINNHUB_API_KEY;
-  if (!key) throw new Error('ยังไม่ได้ตั้งค่า FINNHUB_API_KEY');
-  const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent('OANDA:USD_THB')}&token=${key}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Finnhub error (${r.status})`);
-  const data = await r.json();
-  if (!data || typeof data.c !== 'number' || data.c === 0) {
-    throw new Error('ไม่พบอัตราแลกเปลี่ยน');
+  try {
+    const r = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=THB');
+    if (r.ok) {
+      const data = await r.json();
+      const rate = data && data.rates && data.rates.THB;
+      if (typeof rate === 'number' && rate > 0) return rate;
+    }
+  } catch (e) {
+    // fall through to backup source below
   }
-  return data.c;
+
+  const key = process.env.FINNHUB_API_KEY;
+  if (key) {
+    try {
+      const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent('OANDA:USD_THB')}&token=${key}`;
+      const r2 = await fetch(url);
+      if (r2.ok) {
+        const data2 = await r2.json();
+        if (data2 && typeof data2.c === 'number' && data2.c > 0) return data2.c;
+      }
+    } catch (e) {
+      // no more fallbacks left
+    }
+  }
+
+  throw new Error('ไม่พบอัตราแลกเปลี่ยน (ทั้ง Frankfurter และ Finnhub ใช้ไม่ได้)');
 }
 
 // --- Finnhub: US stocks, ETFs, forex, crypto (free tier) ---
