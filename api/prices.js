@@ -51,9 +51,9 @@ async function getPrice({ ticker, market }) {
 
   if (market === 'crypto') return getFinnhubPrice(normalizeCrypto(ticker));
 
-  if (market === 'gold') return getGoldPrice(ticker);
+if (market === 'gold') return getGoldPrice();
 
-  return getFinnhubPrice(ticker.toUpperCase().trim());
+return getFinnhubPrice(ticker.toUpperCase().trim());
 }
 
 // --- USD/THB exchange rate ---
@@ -127,8 +127,8 @@ async function getThaiPrice(ticker) {
   return price;
 }
 
-async function getGoldPrice(ticker) {
-  const symbol = ticker || 'GC=F';
+async function getGoldPrice() {
+  const symbol = 'GC=F';
 
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
