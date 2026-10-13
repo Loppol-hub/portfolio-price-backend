@@ -44,10 +44,16 @@ export default async function handler(req, res) {
 
 async function getPrice({ ticker, market }) {
   if (market === 'fx') return getFxRate();
+
   if (!ticker) throw new Error('ไม่มีสัญลักษณ์ (ticker)');
+
   if (market === 'th') return getThaiPrice(ticker);
+
   if (market === 'crypto') return getFinnhubPrice(normalizeCrypto(ticker));
-  return getFinnhubPrice(ticker.toUpperCase().trim()); // default: 'us' / foreign stock — Finnhub is case-sensitive
+
+  if (market === 'gold') return getGoldPrice(ticker);
+
+  return getFinnhubPrice(ticker.toUpperCase().trim());
 }
 
 // --- USD/THB exchange rate ---
@@ -118,5 +124,33 @@ async function getThaiPrice(ticker) {
   const price = data && data.chart && data.chart.result && data.chart.result[0]
     && data.chart.result[0].meta && data.chart.result[0].meta.regularMarketPrice;
   if (typeof price !== 'number') throw new Error('ไม่พบราคาสำหรับสัญลักษณ์นี้');
+  return price;
+}
+
+async function getGoldPrice(ticker) {
+  const symbol = ticker || 'GC=F';
+
+  const url =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`;
+
+  const r = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0'
+    }
+  });
+
+  if (!r.ok) {
+    throw new Error(`Yahoo Gold error (${r.status})`);
+  }
+
+  const data = await r.json();
+
+  const price =
+    data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+
+  if (typeof price !== 'number') {
+    throw new Error('ไม่พบราคาทองคำ');
+  }
+
   return price;
 }
