@@ -53,9 +53,7 @@ async function getPrice({ ticker, market }) {
 
   if (market === 'gold') return getGoldPrice();
   
-  if (market === 'fund') return getFundPrice(ticker);
-  
-return getFinnhubPrice(ticker.toUpperCase().trim());
+  return getFinnhubPrice(ticker.toUpperCase().trim());
 }
 
 // --- USD/THB exchange rate ---
