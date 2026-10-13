@@ -51,8 +51,10 @@ async function getPrice({ ticker, market }) {
 
   if (market === 'crypto') return getFinnhubPrice(normalizeCrypto(ticker));
 
-if (market === 'gold') return getGoldPrice();
-
+  if (market === 'gold') return getGoldPrice();
+  
+  if (market === 'fund') return getFundPrice(ticker);
+  
 return getFinnhubPrice(ticker.toUpperCase().trim());
 }
 
