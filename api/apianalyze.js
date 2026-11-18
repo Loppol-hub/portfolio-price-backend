@@ -1,5 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
-
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (Stable Fetch Version)
 export default async function handler(req, res) {
   // ตั้งค่า CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -8,8 +7,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-Type, Date, X-Api-Version');
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
@@ -20,12 +18,10 @@ export default async function handler(req, res) {
     const { action, assetContext, newsTopic, portfolio, userMessage, customPrompt, fileContent } = req.body;
     
     // ตรวจสอบ API Key
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY not found' });
+      return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
-
-    const ai = new GoogleGenAI({ apiKey });
 
     // 1. คำนวณตัวเลขพอร์ตล่วงหน้าเพื่อความแม่นยำ
     const calculatedPortfolio = processPortfolioData(portfolio);
@@ -49,35 +45,48 @@ export default async function handler(req, res) {
 
     const fullPrompt = `${actionPrompt}\n\n${customPrompt ? `เงื่อนไขเพิ่มเติมจากผู้ใช้: ${customPrompt}` : ''}`;
 
-    // 4. เลือกโมเดลและตั้งค่า Grounding (Google Search)
+    // 4. เลือกโมเดลและ Endpoint (ใช้แบบ fetch มาตรฐาน เสถียร ไม่ต้องพึ่งแพ็กเกจเสริม)
     const modelName = 'gemini-3.5-flash-lite';
-    
-    const needsSearch = ['deep_analysis', 'asset_analysis', 'news_analysis', 'greeting'].includes(action) || 
-                        (action === 'chat' && userMessage && userMessage.length > 5);
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-    const config = {
-      systemInstruction: systemInstruction,
-      temperature: 0.3, // ค่าต่ำเพื่อลดการมั่วตัวเลข
+    const requestBody = {
+      contents: [
+        { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullPrompt}` }] }
+      ],
+      tools: [{ googleSearch: {} }], // เปิดใช้งานการค้นหาข้อมูลออนไลน์
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 1500,
+      }
     };
 
-    if (needsSearch) {
-      config.tools = [{ googleSearch: {} }];
-    }
+    // ควบคุมเวลา Timeout (15 วินาที) ป้องกันค้าง
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    // 5. เรียก Gemini API
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: [fullPrompt],
-      config: config,
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
     });
 
-    const analysisText = response.text || 'ขออภัย ระบบไม่สามารถสร้างคำตอบได้ในขณะนี้';
+    clearTimeout(timeoutId);
+    const data = await response.json();
 
-    // 6. ดึงแหล่งอ้างอิง (Grounding Sources) ถ้ามี
+    if (data.error) {
+      return res.status(200).json({ 
+        analysis: `⚠️ Google API Error: ${data.error.message || JSON.stringify(data.error)}`,
+        sources: []
+      });
+    }
+
+    const candidate = data.candidates?.[0];
+    const analysisText = candidate?.content?.parts?.[0]?.text || 'ขออภัย ระบบไม่สามารถสร้างคำตอบได้ในขณะนี้';
+
+    // 5. ดึงแหล่งอ้างอิง (Grounding Sources) ถ้ามี
     let sources = [];
-    const candidate = response.candidates?.[0];
     const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
-    
     if (groundingChunks && Array.isArray(groundingChunks)) {
       sources = groundingChunks
         .filter(chunk => chunk.web?.uri && chunk.web?.title)
@@ -93,11 +102,16 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
+    if (error.name === 'AbortError') {
+      return res.status(200).json({ 
+        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาตอบกลับนานเกินไป กรุณาลองใหม่อีกครั้งครับ',
+        sources: []
+      });
+    }
     console.error('API Error:', error);
-    return res.status(500).json({ 
-      analysis: '⚠️ เกิดข้อผิดพลาดในการประมวลผลของระบบผู้ช่วย AI ลองใหม่อีกครั้งครับ',
-      sources: [],
-      error: error.message 
+    return res.status(200).json({ 
+      analysis: `⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ AI หลังบ้าน: ${error.message}`,
+      sources: []
     });
   }
 }
@@ -208,7 +222,7 @@ function processPortfolioData(portfolio) {
   };
 }
 
-// System Prompt (ปรับปรุงใหม่: ห้ามทักทายซ้ำซาก, ตอบกระชับ, ขยายขนาดตัวหนังสือด้วย HTML tag, อนุญาตค้นหาเว็บ)
+// System Prompt
 function getSystemPrompt(currentTimeStr, portfolioSummary) {
   return `
 คุณคือผู้ช่วยดูแลพอร์ตการลงทุนส่วนตัวของผู้ใช้ ตอบเป็นภาษาไทย
@@ -218,10 +232,10 @@ function getSystemPrompt(currentTimeStr, portfolioSummary) {
 ## กฎเหล็กเคร่งครัด
 1. ห้ามใส่คำทักทายซ้ำซาก (เช่น สวัสดีครับนักเดินทาง หรือยินดีต้อนรับสู่ห้องนักบิน) ในการกดปุ่มหรือส่งข้อความระหว่างการสนทนา คำทักทายให้มีเฉพาะตอนเปิดหน้าต่างแชทครั้งแรกเท่านั้น
 2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
-3. ข้อมูลล่าสุดเท่านั้น ใช้วันที่ปัจจุบันข้างต้น ข้อมูลตลาด ราคา และข่าวต้องค้นออนไลน์ทุกครั้ง ห้ามใช้ความจำสำหรับการฝึกโมเดล ทุกข้อมูลต้องระบุวันที่กำกับ
-4. ตัวเลขในพอร์ตให้ใช้ค่าที่คำนวณมาให้ด้านล่างนี้เท่านั้น ห้ามคำนวณใหม่เอง
-5. ใช้เฉพาะแหล่งข้อมูลที่น่าเชื่อถือ (เช่น SET, กลต., ธปท., Reuters, Bloomberg)
-6. ขนาดตัวหนังสือ: ครอบข้อความหลักทั้งหมดด้วยแท็ก HTML ขนาดใหญ่เพื่อให้ตัวหนังสืออ่านง่ายขึ้น เช่น <span style="font-size: 16px; line-height: 1.6;"> ... </span>
+3. เปิดกว้างการค้นหาข้อมูล: หากผู้ใช้ถามคำถามทั่วไป ข้อมูลบริษัท (เช่น Microsoft, เงินสดบริษัท) หรือสถานการณ์ภายนอก ให้ใช้ Google Search ค้นหาข้อมูลออนไลน์และตอบตามจริงอย่างสมเหตุสมผล ห้ามปฏิเสธว่าไม่มีข้อมูลในพอร์ต
+4. ข้อมูลตลาด ราคา และข่าวต้องค้นออนไลน์ทุกครั้ง พร้อมระบุวันที่กำกับ
+5. ตัวเลขในพอร์ตให้ใช้ค่าที่คำนวณมาให้ด้านล่างนี้เท่านั้น ห้ามคำนวณใหม่เอง
+6. ขนาดตัวหนังสือ: ครอบข้อความหลักทั้งหมดด้วยแท็ก HTML เพื่อขยายขนาดตัวหนังสือให้อ่านง่ายขึ้น เช่น <span style="font-size: 16px; line-height: 1.6;"> ... </span>
 7. ท้ายคำตอบทุกครั้งให้มีบรรทัดสั้นๆ ว่า: "ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล"
 
 ## รูปแบบการตอบ
@@ -235,13 +249,13 @@ ${JSON.stringify(portfolioSummary, null, 2)}
 `;
 }
 
-// Action Prompts (ปรับปรุงโครงสร้างการวิเคราะห์ตามสัดส่วน 50/30/10/10 และตอบโจทย์ทุกปุ่ม)
+// Action Prompts
 function getActionPrompt(action, assetContext, newsTopic, userMessage, fileContent) {
   let baseContent = fileContent ? `\n\nเนื้อหาจากไฟล์ที่ผู้ใช้แนบมา:\n${fileContent}` : '';
 
   switch (action) {
     case 'greeting':
-      return `ทักทายสั้นๆ 1 ประโยค และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ (มูลค่ารวม กำไร/ขาดทุน และเงินสด) ไม่เยิ่นเย้อ`;
+      return `ทักทายต้อนรับเข้าห้องแชทสั้นๆ 1 ประโยค และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ (มูลค่ารวม กำไร/ขาดทุน และเงินสด) ไม่เยิ่นเย้อ`;
 
     case 'deep_analysis':
       return `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้จัดไว้ (หุ้นไทย 50%, หุ้นต่างประเทศ 30%, ทองคำ 10%, คริปโต 10%) ตอบตามโครงสร้างนี้เท่านั้น:
@@ -287,6 +301,6 @@ function getActionPrompt(action, assetContext, newsTopic, userMessage, fileConte
 
     case 'chat':
     default:
-      return `ผู้ใช้สอบถามว่า: "${userMessage}"${baseContent}\nตอบคำถามให้ตรงประเด็นโดยใช้ข้อมูลพอร์ตและค้นหาข้อมูลออนไลน์ประกอบถ้าจำเป็น`;
+      return `ผู้ใช้สอบถามว่า: "${userMessage}"${baseContent}\nค้นหาข้อมูลออนไลน์และตอบคำถามให้ตรงประเด็นอย่างละเอียด`;
   }
 }
