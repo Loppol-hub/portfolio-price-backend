@@ -1,6 +1,5 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (Moon)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (Fix Grounding & Tool Structure)
 export default async function handler(req, res) {
-  // 8. เปิด CORS ให้โดเมนของแอพ
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -17,16 +16,13 @@ export default async function handler(req, res) {
   try {
     const { action, assetContext, newsTopic, portfolio, userMessage, customPrompt, fileContent } = req.body;
     
-    // 8. ตรวจสอบ API Key จาก process.env
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
       return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ', sources: [] });
     }
 
-    // 3. คำนวณตัวเลขพอร์ตล่วงหน้าด้วยโค้ดฝั่งเซิร์ฟเวอร์
     const calculatedPortfolio = processPortfolioData(portfolio);
 
-    // 2. ฝังวันที่และเวลาปัจจุบันเขตเวลา Asia/Bangkok
     const now = new Date();
     const formatter = new Intl.DateTimeFormat('th-TH', {
       timeZone: 'Asia/Bangkok',
@@ -39,13 +35,11 @@ export default async function handler(req, res) {
     });
     const currentTimeStr = formatter.format(now);
 
-    // 1. ประกอบ prompt จาก SYSTEM_PROMPT (ส่วน B) + ACTION_PROMPT (ส่วน C) + ข้อมูลพอร์ต + customPrompt
     const systemInstruction = getSystemPrompt(currentTimeStr, calculatedPortfolio);
     const actionPrompt = getActionPrompt(action, assetContext, newsTopic, userMessage, fileContent);
 
     const fullPrompt = `${actionPrompt}\n\n${customPrompt ? `เงื่อนไขเพิ่มเติมจากผู้ใช้: ${customPrompt}` : ''}`;
 
-    // 4. เลือกโมเดลและตั้งค่า Google Search Grounding ตาม Action
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -57,16 +51,16 @@ export default async function handler(req, res) {
         { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullPrompt}` }] }
       ],
       generationConfig: {
-        temperature: 0.3, // 6. ตั้ง temperature ต่ำเพื่อลดการมั่วตัวเลข
+        temperature: 0.3,
         maxOutputTokens: 2000,
       }
     };
 
+    // ปรับรูปแบบการใส่ tools ให้ถูกต้องปลอดภัยสำหรับ Gemini API
     if (needsSearch) {
       requestBody.tools = [{ googleSearch: {} }];
     }
 
-    // 7. จัดการ error: timeout 60 วินาที
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -81,9 +75,9 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (data.error) {
-      console.error('Google API Error:', data.error);
+      console.error('Google API Error:', JSON.stringify(data.error));
       return res.status(200).json({ 
-        analysis: 'ขออภัย ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง',
+        analysis: `ขออภัย ดึงข้อมูลไม่สำเร็จ (${data.error.message || 'API Error'}) ลองใหม่อีกครั้ง`,
         sources: []
       });
     }
@@ -91,7 +85,6 @@ export default async function handler(req, res) {
     const candidate = data.candidates?.[0];
     const analysisText = candidate?.content?.parts?.[0]?.text || 'ขออภัย ระบบไม่สามารถสร้างคำตอบได้ในขณะนี้';
 
-    // 5. ดึงรายการแหล่งอ้างอิงจาก groundingMetadata ของ response
     let sources = [];
     const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
     if (groundingChunks && Array.isArray(groundingChunks)) {
@@ -109,8 +102,7 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    // 7. จัดการ error และ log
-    console.error('API Error:', error);
+    console.error('API Catch Error:', error);
     return res.status(200).json({ 
       analysis: 'ขออภัย ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง',
       sources: []
@@ -118,14 +110,13 @@ export default async function handler(req, res) {
   }
 }
 
-// 3. ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์
+// ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์
 function processPortfolioData(portfolio) {
   if (!portfolio) {
     return { status: 'พอร์ตว่างเปล่า' };
   }
 
   const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
-  // ตัดข้อมูล tradeLogs ให้เหลือเฉพาะ 12 เดือนล่าสุดตามข้อกำหนด
   const rawTradeLogs = Array.isArray(portfolio.tradeLogs) ? portfolio.tradeLogs : [];
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -150,7 +141,6 @@ function processPortfolioData(portfolio) {
     const currency = h?.currency === 'USD' ? 'USD' : 'THB';
     const isDr = h?.instrumentType === 'dr';
 
-    // มูลค่าตลาดและต้นทุนเป็นบาท (USD คูณ fxRate, DR ไม่คูณ)
     const effRate = (currency === 'USD' && !isDr) ? fxRate : 1;
     const marketValue = qty * price * effRate;
     
@@ -198,7 +188,6 @@ function processPortfolioData(portfolio) {
   const totalGain = totalInvestedValue - totalInvestedCost;
   const totalGainPct = totalInvestedCost > 0 ? (totalGain / totalInvestedCost) * 100 : 0;
 
-  // สรุปรายการซื้อขายเดือนปัจจุบัน
   const currentMonthPrefix = new Date().toISOString().slice(0, 7);
   const currentMonthLogs = tradeLogs.filter(l => l && l.date && typeof l.date === 'string' && l.date.startsWith(currentMonthPrefix));
   const buyLogs = currentMonthLogs.filter(l => l && l.action === 'buy');
