@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     // ดึง Gemini API Key จาก Environment Variable (ปลอดภัยที่สุด)
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า API Key สำหรับ AI ครับ' });
+      return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
 
     // 1. กำหนดกฎเหล็กและความปลอดภัย (System Instruction)
@@ -97,7 +97,10 @@ ${fileContext}
     const data = await response.json();
 
     if (data.error) {
-      throw new Error(data.error.message || 'เกิดข้อผิดพลาดจาก Gemini API');
+      // ส่ง Error ตรงๆ ออกมาแสดงที่หน้าแชท เพื่อให้ตรวจสอบปัญหาได้ทันที
+      return res.status(200).json({ 
+        analysis: `⚠️ Google API Error: ${data.error.message || JSON.stringify(data.error)}` 
+      });
     }
 
     const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
@@ -106,8 +109,9 @@ ${fileContext}
 
   } catch (error) {
     console.error('[API Error]:', error);
-    return res.status(500).json({ 
-      analysis: '⚠️ เกิดข้อผิดพลาดในการประมวลผลของระบบ AI กรุณาตรวจสอบการตั้งค่า API Key อีกครั้งครับ' 
+    // ส่ง Error รายละเอียดกลับไปโชว์ที่หน้าจอแชทชั่วคราว
+    return res.status(200).json({ 
+      analysis: `⚠️ Server Error: ${error.message}` 
     });
   }
 }
