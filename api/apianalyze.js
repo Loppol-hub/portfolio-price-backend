@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     // 2. จัดการไฟล์คู่มือ/ข้อมูลที่ผู้ใช้อัปโหลดให้อ่าน (File Context)
     let fileContext = '';
     if (fileContent) {
-      fileContext = `\n\n[คู่มือ/ข้อมูลอ้างอิงเฉพาะทางที่ผู้ใช้อัปโหลดให้เรียนรู้]:\n${fileContent}`;
+      fileContext = `\n\n[คู่มือ/ข้อมูลอ้างอิงเฉพาะทางที่ผู้ใช้อัปโหลดให้เรียนรู้]:\n${fileContext}`;
     }
 
     // 3. จัดเตรียมบริบทข้อมูลพอร์ตและการกระทำ (Action Handling)
@@ -77,8 +77,8 @@ ${fileContext}
 เป้าหมายการทำงาน/คำถาม: ${contextPrompt}
     `.trim();
 
-    // 4. เปลี่ยนมาใช้โมเดล gemini-2.0-flash และ Endpoint v1 ที่รองรับเสถียรแล้ว
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    // 4. ใช้รุ่นโมเดลล่าสุดตามคำแนะนำของ Google API: gemini-3.8-flash
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`;
     
     const response = await fetch(geminiUrl, {
       method: 'POST',
