@@ -77,8 +77,8 @@ ${fileContext}
 เป้าหมายการทำงาน/คำถาม: ${contextPrompt}
     `.trim();
 
-    // 4. เรียกใช้งาน Google Gemini API (ใช้โมเดลมาตรฐานที่รองรับการวิเคราะห์)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // 4. เปลี่ยนมาใช้โมเดล gemini-2.0-flash และ Endpoint v1 ที่รองรับเสถียรแล้ว
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     
     const response = await fetch(geminiUrl, {
       method: 'POST',
@@ -97,7 +97,6 @@ ${fileContext}
     const data = await response.json();
 
     if (data.error) {
-      // ส่ง Error ตรงๆ ออกมาแสดงที่หน้าแชท เพื่อให้ตรวจสอบปัญหาได้ทันที
       return res.status(200).json({ 
         analysis: `⚠️ Google API Error: ${data.error.message || JSON.stringify(data.error)}` 
       });
@@ -109,7 +108,6 @@ ${fileContext}
 
   } catch (error) {
     console.error('[API Error]:', error);
-    // ส่ง Error รายละเอียดกลับไปโชว์ที่หน้าจอแชทชั่วคราว
     return res.status(200).json({ 
       analysis: `⚠️ Server Error: ${error.message}` 
     });
