@@ -1,6 +1,5 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (Stable Fetch Version)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (Fix Null Filter Error)
 export default async function handler(req, res) {
-  // ตั้งค่า CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -17,13 +16,12 @@ export default async function handler(req, res) {
   try {
     const { action, assetContext, newsTopic, portfolio, userMessage, customPrompt, fileContent } = req.body;
     
-    // ตรวจสอบ API Key
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
       return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
 
-    // 1. คำนวณตัวเลขพอร์ตล่วงหน้าเพื่อความแม่นยำ
+    // 1. คำนวณตัวเลขพอร์ตล่วงหน้า (ปลอดภัยจากค่า Null)
     const calculatedPortfolio = processPortfolioData(portfolio);
 
     // 2. ดึงเวลาปัจจุบัน (Asia/Bangkok)
@@ -45,7 +43,6 @@ export default async function handler(req, res) {
 
     const fullPrompt = `${actionPrompt}\n\n${customPrompt ? `เงื่อนไขเพิ่มเติมจากผู้ใช้: ${customPrompt}` : ''}`;
 
-    // 4. เลือกโมเดลและ Endpoint (ใช้แบบ fetch มาตรฐาน เสถียร ไม่ต้องพึ่งแพ็กเกจเสริม)
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -53,14 +50,13 @@ export default async function handler(req, res) {
       contents: [
         { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullPrompt}` }] }
       ],
-      tools: [{ googleSearch: {} }], // เปิดใช้งานการค้นหาข้อมูลออนไลน์
+      tools: [{ googleSearch: {} }],
       generationConfig: {
         temperature: 0.3,
         maxOutputTokens: 1500,
       }
     };
 
-    // ควบคุมเวลา Timeout (15 วินาที) ป้องกันค้าง
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -84,12 +80,11 @@ export default async function handler(req, res) {
     const candidate = data.candidates?.[0];
     const analysisText = candidate?.content?.parts?.[0]?.text || 'ขออภัย ระบบไม่สามารถสร้างคำตอบได้ในขณะนี้';
 
-    // 5. ดึงแหล่งอ้างอิง (Grounding Sources) ถ้ามี
     let sources = [];
     const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
     if (groundingChunks && Array.isArray(groundingChunks)) {
       sources = groundingChunks
-        .filter(chunk => chunk.web?.uri && chunk.web?.title)
+        .filter(chunk => chunk?.web?.uri && chunk?.web?.title)
         .map(chunk => ({
           title: chunk.web.title,
           url: chunk.web.uri
@@ -116,13 +111,19 @@ export default async function handler(req, res) {
   }
 }
 
-// ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์
+// ฟังก์ชันคำนวณข้อมูลพอร์ต (ป้องกัน Null/Undefined Error ทุกจุด)
 function processPortfolioData(portfolio) {
-  if (!portfolio || !portfolio.holdings) {
+  if (!portfolio) {
     return { status: 'พอร์ตว่างเปล่า' };
   }
 
-  const { holdings = [], tradeLogs = [], cashLedger = [], history = [], yearlyHistory = [], initialCapital = 0, fxRate = 36.5 } = portfolio;
+  const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
+  const tradeLogs = Array.isArray(portfolio.tradeLogs) ? portfolio.tradeLogs : [];
+  const cashLedger = Array.isArray(portfolio.cashLedger) ? portfolio.cashLedger : [];
+  const history = Array.isArray(portfolio.history) ? portfolio.history : [];
+  const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
+  const initialCapital = parseFloat(portfolio.initialCapital) || 0;
+  const fxRate = parseFloat(portfolio.fxRate) || 36.5;
 
   let totalInvestedValue = 0;
   let totalInvestedCost = 0;
@@ -131,31 +132,31 @@ function processPortfolioData(portfolio) {
   let usdAssetsValue = 0;
 
   const enrichedHoldings = holdings.map(h => {
-    const qty = parseFloat(h.quantity) || 0;
-    const avg = parseFloat(h.avgCost) || 0;
-    const price = parseFloat(h.currentPrice) || 0;
-    const currency = h.currency === 'USD' ? 'USD' : 'THB';
-    const isDr = h.instrumentType === 'dr';
+    const qty = parseFloat(h?.quantity) || 0;
+    const avg = parseFloat(h?.avgCost) || 0;
+    const price = parseFloat(h?.currentPrice) || 0;
+    const currency = h?.currency === 'USD' ? 'USD' : 'THB';
+    const isDr = h?.instrumentType === 'dr';
 
     const effRate = (currency === 'USD' && !isDr) ? fxRate : 1;
     const marketValue = qty * price * effRate;
     
-    const fixedRate = (currency === 'USD' && !isDr) ? (h.createdFxRate || fxRate) : 1;
-    const costValue = h.totalCostThb !== undefined && h.totalCostThb !== null 
-      ? h.totalCostThb 
+    const fixedRate = (currency === 'USD' && !isDr) ? (parseFloat(h?.createdFxRate) || fxRate) : 1;
+    const costValue = h?.totalCostThb !== undefined && h?.totalCostThb !== null 
+      ? parseFloat(h.totalCostThb) 
       : (qty * avg * fixedRate);
 
     const gain = marketValue - costValue;
     const gainPct = costValue > 0 ? (gain / costValue) * 100 : 0;
 
-    if (h.type !== 'cash') {
+    if (h?.type !== 'cash') {
       totalInvestedValue += marketValue;
       totalInvestedCost += costValue;
       
-      const typeKey = (h.type === 'th_stock' && h.instrumentType === 'dr') ? 'foreign_stock' : h.type;
+      const typeKey = (h?.type === 'th_stock' && h?.instrumentType === 'dr') ? 'foreign_stock' : (h?.type || 'other');
       typeValues[typeKey] = (typeValues[typeKey] || 0) + marketValue;
 
-      const ind = (h.industry && h.industry.trim()) || 'อื่นๆ';
+      const ind = (h?.industry && typeof h.industry === 'string' && h.industry.trim()) || 'อื่นๆ';
       industryValues[ind] = (industryValues[ind] || 0) + marketValue;
 
       if (currency === 'USD' && !isDr) {
@@ -185,13 +186,13 @@ function processPortfolioData(portfolio) {
   const totalGainPct = totalInvestedCost > 0 ? (totalGain / totalInvestedCost) * 100 : 0;
 
   const currentMonthPrefix = new Date().toISOString().slice(0, 7);
-  const currentMonthLogs = tradeLogs.filter(l => l && l.date && l.date.startsWith(currentMonthPrefix));
-  const buyLogs = currentMonthLogs.filter(l => l.action === 'buy');
-  const sellLogs = currentMonthLogs.filter(l => l.action === 'sell');
+  const currentMonthLogs = tradeLogs.filter(l => l && l.date && typeof l.date === 'string' && l.date.startsWith(currentMonthPrefix));
+  const buyLogs = currentMonthLogs.filter(l => l && l.action === 'buy');
+  const sellLogs = currentMonthLogs.filter(l => l && l.action === 'sell');
   
-  const totalBuyVal = buyLogs.reduce((s, l) => s + ((l.quantity || 0) * (l.price || 0) * (l.currency === 'USD' ? fxRate : 1)), 0);
-  const totalSellVal = sellLogs.reduce((s, l) => s + ((l.quantity || 0) * (l.price || 0) * (l.currency === 'USD' ? fxRate : 1)), 0);
-  const totalMonthFee = currentMonthLogs.reduce((s, l) => s + (l.feeThbRecord || 0), 0);
+  const totalBuyVal = buyLogs.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(l.price) || 0) * (l.currency === 'USD' ? fxRate : 1)), 0);
+  const totalSellVal = sellLogs.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(l.price) || 0) * (l.currency === 'USD' ? fxRate : 1)), 0);
+  const totalMonthFee = currentMonthLogs.reduce((s, l) => s + (parseFloat(l.feeThbRecord) || 0), 0);
 
   return {
     totalAssetValue,
@@ -214,7 +215,7 @@ function processPortfolioData(portfolio) {
       totalBuyVal,
       totalSellVal,
       totalMonthFee,
-      sellLogsDetails: sellLogs.map(l => ({ name: l.assetName, pnlThb: l.pnlThb || 0 }))
+      sellLogsDetails: sellLogs.map(l => ({ name: l?.assetName || 'สินทรัพย์', pnlThb: parseFloat(l?.pnlThb) || 0 }))
     },
     holdings: enrichedHoldings,
     yearlyHistory: yearlyHistory.slice(-3),
@@ -230,9 +231,9 @@ function getSystemPrompt(currentTimeStr, portfolioSummary) {
 เวลาปัจจุบัน: ${currentTimeStr}
 
 ## กฎเหล็กเคร่งครัด
-1. ห้ามใส่คำทักทายซ้ำซาก (เช่น สวัสดีครับนักเดินทาง หรือยินดีต้อนรับสู่ห้องนักบิน) ในการกดปุ่มหรือส่งข้อความระหว่างการสนทนา คำทักทายให้มีเฉพาะตอนเปิดหน้าต่างแชทครั้งแรกเท่านั้น
+1. ห้ามใส่คำทักทายซ้ำซาก ในการกดปุ่มหรือส่งข้อความระหว่างการสนทนา คำทักทายให้มีเฉพาะตอนเปิดหน้าต่างแชทครั้งแรกเท่านั้น
 2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
-3. เปิดกว้างการค้นหาข้อมูล: หากผู้ใช้ถามคำถามทั่วไป ข้อมูลบริษัท (เช่น Microsoft, เงินสดบริษัท) หรือสถานการณ์ภายนอก ให้ใช้ Google Search ค้นหาข้อมูลออนไลน์และตอบตามจริงอย่างสมเหตุสมผล ห้ามปฏิเสธว่าไม่มีข้อมูลในพอร์ต
+3. เปิดกว้างการค้นหาข้อมูล: หากผู้ใช้ถามคำถามทั่วไป ข้อมูลบริษัท หรือสถานการณ์ภายนอก ให้ใช้ Google Search ค้นหาข้อมูลออนไลน์และตอบตามจริงอย่างสมเหตุสมผล
 4. ข้อมูลตลาด ราคา และข่าวต้องค้นออนไลน์ทุกครั้ง พร้อมระบุวันที่กำกับ
 5. ตัวเลขในพอร์ตให้ใช้ค่าที่คำนวณมาให้ด้านล่างนี้เท่านั้น ห้ามคำนวณใหม่เอง
 6. ขนาดตัวหนังสือ: ครอบข้อความหลักทั้งหมดด้วยแท็ก HTML เพื่อขยายขนาดตัวหนังสือให้อ่านง่ายขึ้น เช่น <span style="font-size: 16px; line-height: 1.6;"> ... </span>
