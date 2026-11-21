@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ฉบับสมบูรณ์)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ดึงข้อมูลพอร์ตตรงๆ ไม่คำนวณซ้ำ)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -33,8 +33,8 @@ export default async function handler(req, res) {
     });
     const currentTimeStr = formatter.format(now);
 
-    // 2. คำนวณตัวเลขพอร์ตจากฝั่งโค้ดหลังบ้าน (พร้อมแก้ปัญหาเงินสดให้ตรงกับหน้าจอ)
-    const calculatedPortfolio = processPortfolioData(portfolio);
+    // 2. ดึงข้อมูลจากพอร์ตตรงๆ (ไม่ผ่านสูตรคำนวณซับซ้อน)
+    const directPortfolioData = extractDirectPortfolioData(portfolio);
 
     // 3. กำหนดกฎการตอบ
     let systemInstruction = `
@@ -42,40 +42,39 @@ export default async function handler(req, res) {
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr} (ห้ามเดาวันที่เอง)
 
 กฎเหล็กเคร่งครัด:
-1. ห้ามใส่คำทักทายซ้ำซาก (เช่น "สวัสดีครับนักเดินทาง...") หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม คำทักทายให้มีเฉพาะตอนเปิดแชทครั้งแรกเท่านั้น
+1. ห้ามใส่คำทักทายซ้ำซาก (เช่น "สวัสดีครับนักเดินทาง...") หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
 2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
 3. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
-4. ตัวเลขและสัดส่วนต่างๆ ของพอร์ตให้ยึดตามที่ระบบคำนวณมาให้ใน "ข้อมูลพอร์ตที่คำนวณแล้ว" เท่านั้น ห้ามคำนวณใหม่เอง
-5. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
+4. ตัวเลขสำคัญทั้งหมด (เงินสด, ปันผล, เงินที่นำไปลงทุน, ผลประกอบการรวม, ทุนเริ่มต้นสะสม, รีบาลานซ์) ให้ยึดตามค่าที่ระบุไว้ใน "ข้อมูลพอร์ตจากระบบ" เท่านั้น ห้ามคำนวณหรือเปลี่ยนตัวเลขเองเด็ดขาด
     `.trim();
 
     if (customPrompt) {
       systemInstruction += `\n\nกติกาเพิ่มเติมจากผู้ใช้:\n${customPrompt}`;
     }
 
-    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
+    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContext}` : '';
 
-    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้ตรงตามความต้องการ
+    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
     let contextPrompt = '';
     
     switch (action) {
       case 'greeting':
-        contextPrompt = 'ทักทายต้อนรับเข้าห้องแชทสั้นๆ และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ (มูลค่ารวม, กำไร/ขาดทุน, สัดส่วนเงินสด)';
+        contextPrompt = 'ทักทายต้อนรับเข้าห้องแชทสั้นๆ และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ (อิงตัวเลขเงินสด, ผลประกอบการรวม, และทุนจากข้อมูลพอร์ต)';
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ (หุ้นไทย 50%, หุ้นต่างประเทศ 30%, ทองคำ 10%, คริปโต 10%) ให้ตอบตาม 3 หัวข้อนี้เท่านั้น:
-        1. สัดส่วนสินทรัพย์ปัจจุบัน (เปรียบเทียบภาพรวมแต่ละกลุ่มกับเป้าหมายจากข้อมูลที่คำนวณแล้ว)
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมาย ให้ตอบตาม 3 หัวข้อนี้เท่านั้น:
+        1. สัดส่วนสินทรัพย์ปัจจุบันเทียบกับเป้าหมาย
         2. การกระจายตัวและความเสี่ยงของพอร์ต
-        3. คำแนะนำว่าสินทรัพย์กลุ่มไหนมีสัดส่วนมากหรือน้อยเกินไป และควรปรับเพิ่มหรือลดกลุ่มไหน`;
+        3. คำแนะนำว่าสินทรัพย์กลุ่มไหนควรปรับเพิ่มหรือลด`;
         break;
 
       case 'portfolio_summary':
-        contextPrompt = 'สรุปภาพรวมผลตอบแทนประจำเดือนนี้: อัตรากำไร/ขาดทุนรวมจากเงินต้นทั้งหมด, การเติบโตเทียบกับเดือนก่อนหน้า และสรุปภาพรวมการซื้อขายแบบกระชับ ตรงประเด็น';
+        contextPrompt = 'สรุปภาพรวมพอร์ตและผลประกอบการจากข้อมูลที่ให้มาแบบกระชับ ตรงประเด็น';
         break;
 
       case 'asset_analysis':
-        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
+        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน แบบกระชับ`;
         break;
 
       case 'news_analysis':
@@ -89,13 +88,13 @@ export default async function handler(req, res) {
     }
 
     const fullUserPrompt = `
-ข้อมูลพอร์ตที่คำนวณแล้ว: ${JSON.stringify(calculatedPortfolio)}
+ข้อมูลพอร์ตจากระบบ: ${JSON.stringify(directPortfolioData)}
 ${fileContext}
 
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 5. เรียกใช้งาน Gemini API (ใช้รุ่นที่เสถียรและรวดเร็ว)
+    // 5. เรียกใช้งาน Gemini API
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -142,127 +141,39 @@ ${fileContext}
   }
 }
 
-// ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์ (Pre-calculate พร้อมแก้ปัญหาเงินสด)
-function processPortfolioData(portfolio) {
+// ฟังก์ชันดึงข้อมูลจากพอร์ตตรงๆ (Direct Extraction ตามที่ผู้ใช้ระบุ 6 ข้อหลัก)
+function extractDirectPortfolioData(portfolio) {
   if (!portfolio) {
     return { status: 'พอร์ตว่างเปล่า' };
   }
 
-  const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
-  const rawTradeLogs = Array.isArray(portfolio.tradeLogs) ? portfolio.tradeLogs : [];
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-  const tradeLogs = rawTradeLogs.filter(l => l && l.date && new Date(l.date) >= oneYearAgo);
-
-  const cashLedger = Array.isArray(portfolio.cashLedger) ? portfolio.cashLedger : [];
-  const history = Array.isArray(portfolio.history) ? portfolio.history : [];
-  const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
-  const initialCapital = parseFloat(portfolio.initialCapital) || 0;
-  const fxRate = parseFloat(portfolio.fxRate) || 36.5;
-
-  let totalInvestedValue = 0;
-  let totalInvestedCost = 0;
-  const typeValues = {};
-  const industryValues = {};
-  let usdAssetsValue = 0;
-
-  const enrichedHoldings = holdings.map(h => {
-    const qty = parseFloat(h?.quantity) || 0;
-    const avg = parseFloat(h?.avgCost) || 0;
-    const price = parseFloat(h?.currentPrice) || 0;
-    const currency = h?.currency === 'USD' ? 'USD' : 'THB';
-    const isDr = h?.instrumentType === 'dr';
-
-    const effRate = (currency === 'USD' && !isDr) ? fxRate : 1;
-    const marketValue = qty * price * effRate;
+  return {
+    // 1. เงินสด (สภาพคล่องในพอร์ต)
+    cash: portfolio.cashBalance ?? portfolio.currentCash ?? portfolio.cash ?? 0,
     
-    const fixedRate = (currency === 'USD' && !isDr) ? (parseFloat(h?.createdFxRate) || fxRate) : 1;
-    const costValue = h?.totalCostThb !== undefined && h?.totalCostThb !== null 
-      ? parseFloat(h.totalCostThb) 
-      : (qty * avg * fixedRate);
+    // 2. เงินปันผลรับ
+    dividend: portfolio.dividend ?? portfolio.totalDividend ?? portfolio.dividends ?? 0,
+    
+    // 3. เงินที่นำไปลงทุน
+    investedAmount: portfolio.investedAmount ?? portfolio.totalInvestedCost ?? portfolio.invested ?? 0,
+    
+    // 4. ผลประกอบการรวม
+    totalGain: portfolio.totalGain ?? portfolio.performance ?? portfolio.totalProfit ?? 0,
+    
+    // 5. ทุนเริ่มต้นสะสม
+    initialCapital: portfolio.initialCapital ?? portfolio.cumulativeInitialCapital ?? 0,
+    
+    // 6. รีบาลานซ์
+    rebalance: portfolio.rebalance ?? portfolio.totalRebalance ?? 0,
 
-    const gain = marketValue - costValue;
-    const gainPct = costValue > 0 ? (gain / costValue) * 100 : 0;
-
-    if (h?.type !== 'cash') {
-      totalInvestedValue += marketValue;
-      totalInvestedCost += costValue;
-      
-      const typeKey = (h?.type === 'th_stock' && h?.instrumentType === 'dr') ? 'foreign_stock' : (h?.type || 'other');
-      typeValues[typeKey] = (typeValues[typeKey] || 0) + marketValue;
-
-      const ind = (h?.industry && typeof h.industry === 'string' && h.industry.trim()) || 'อื่นๆ';
-      industryValues[ind] = (industryValues[ind] || 0) + marketValue;
-
-      if (currency === 'USD' && !isDr) {
-        usdAssetsValue += marketValue;
-      }
-    }
-
-    return {
+    // ข้อมูลภาพรวมสินทรัพย์และรายชื่อย่อ
+    fxRate: portfolio.fxRate || 36.5,
+    holdings: Array.isArray(portfolio.holdings) ? portfolio.holdings.map(h => ({
       name: h?.name || '',
       ticker: h?.ticker || '',
       type: h?.type || '',
-      marketValue: Math.round(marketValue),
-      costValue: Math.round(costValue),
-      gain: Math.round(gain),
-      gainPct: parseFloat(gainPct.toFixed(2))
-    };
-  });
-
-  const capitalAdd = cashLedger.filter(e => e && e.type === 'capital_add').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const capitalReduce = cashLedger.filter(e => e && e.type === 'capital_reduce').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const profits = cashLedger.filter(e => e && e.type === 'profit').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const losses = cashLedger.filter(e => e && (e.type === 'loss' || e.type === 'fee')).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const dividends = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const rebalances = cashLedger.filter(e => e && e.type === 'rebalance').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-
-  // คำนวณเงินสดให้สอดคล้องกับหน้าจอจริง
-  let computedCash = portfolio.cashBalance !== undefined && portfolio.cashBalance !== null 
-    ? parseFloat(portfolio.cashBalance) 
-    : (initialCapital + capitalAdd - capitalReduce + profits - losses + dividends + rebalances - totalInvestedCost);
-
-  if (computedCash < 0 && portfolio.currentCash !== undefined) {
-    computedCash = parseFloat(portfolio.currentCash) || 9059.63;
-  }
-
-  const totalAssetValue = totalInvestedValue + computedCash;
-  const totalGain = totalInvestedValue - totalInvestedCost;
-  const totalGainPct = totalInvestedCost > 0 ? (totalGain / totalInvestedCost) * 100 : 0;
-
-  const currentMonthPrefix = new Date().toISOString().slice(0, 7);
-  const currentMonthLogs = tradeLogs.filter(l => l && l.date && typeof l.date === 'string' && l.date.startsWith(currentMonthPrefix));
-  const buyLogs = currentMonthLogs.filter(l => l && l.action === 'buy');
-  const sellLogs = currentMonthLogs.filter(l => l && l.action === 'sell');
-  
-  const totalBuyVal = buyLogs.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(l.price) || 0) * (l.currency === 'USD' ? fxRate : 1)), 0);
-  const totalSellVal = sellLogs.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(l.price) || 0) * (l.currency === 'USD' ? fxRate : 1)), 0);
-  const totalMonthFee = currentMonthLogs.reduce((s, l) => s + (parseFloat(l.feeThbRecord) || 0), 0);
-
-  return {
-    totalAssetValue: Math.round(totalAssetValue),
-    totalInvestedValue: Math.round(totalInvestedValue),
-    totalInvestedCost: Math.round(totalInvestedCost),
-    computedCash: Math.round(computedCash),
-    totalGain: Math.round(totalGain),
-    totalGainPct: parseFloat(totalGainPct.toFixed(2)),
-    totalCapital: Math.round(initialCapital + capitalAdd - capitalReduce),
-    fxRate,
-    holdingsCount: enrichedHoldings.length,
-    typeBreakdown: typeValues,
-    industryBreakdown: industryValues,
-    usdExposurePct: parseFloat((totalAssetValue > 0 ? (usdAssetsValue / totalAssetValue) * 100 : 0).toFixed(2)),
-    cashRatioPct: parseFloat((totalAssetValue > 0 ? (computedCash / totalAssetValue) * 100 : 0).toFixed(2)),
-    currentMonthSummary: {
-      month: currentMonthPrefix,
-      buyCount: buyLogs.length,
-      sellCount: sellLogs.length,
-      totalBuyVal: Math.round(totalBuyVal),
-      totalSellVal: Math.round(totalSellVal),
-      totalMonthFee: Math.round(totalMonthFee)
-    },
-    holdings: enrichedHoldings,
-    yearlyHistory: yearlyHistory.length > 0 ? yearlyHistory.slice(-3) : null,
-    history: history.length > 0 ? history.slice(-6) : null
+      quantity: h?.quantity || 0,
+      currentPrice: h?.currentPrice || 0
+    })) : []
   };
 }
