@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI (พร้อมระบบย่อข้อมูลพอร์ตป้องกัน Token ลิมิต)
+// apianalyze.js - Backend สำหรับประมวลผล AI (เสถียร ไม่ติดปัญหา Quota Search)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ', sources: [] });
     }
 
-    // 1. ย่อและกรองข้อมูลพอร์ตให้กะทัดรัด ไม่ให้ Token ลิมิตเต็ม
+    // 1. ย่อและกรองข้อมูลพอร์ตให้กะทัดรัด ป้องกัน Token ลิมิต
     const leanPortfolio = summarizePortfolioForAI(portfolio);
 
     // 2. กำหนดกฎการตอบ
@@ -28,10 +28,9 @@ export default async function handler(req, res) {
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 กฎเหล็กเคร่งครัด:
 1. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
-2. ต้องค้นหาข้อมูลออนไลน์และอ้างอิงจากสำนักข่าวหรือแหล่งข้อมูลทางการที่น่าเชื่อถือที่สุดเสมอ และต้องเป็นข้อมูลปัจจุบันที่สุด
-3. หากข้อมูล ข่าวสาร หรือบทวิเคราะห์เป็นภาษาต่างประเทศ ให้แปลและสรุปเป็นภาษาไทยที่สละสลวย ชัดเจน
-4. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
-5. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
+2. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
+3. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
+4. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
     `.trim();
 
     if (customPrompt) {
@@ -49,10 +48,10 @@ export default async function handler(req, res) {
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ พร้อมค้นหาข้อมูลแนวโน้มตลาดปัจจุบันประกอบ ให้ตอบตาม 3 หัวข้อ:
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ ให้ตอบตาม 3 หัวข้อ:
         1. สัดส่วนสินทรัพย์ปัจจุบันเทียบกับภาพรวม
         2. การกระจายตัวและความเสี่ยงของพอร์ต
-        3. คำแนะนำการปรับพอร์ตตามภาวะตลาดปัจจุบัน`;
+        3. คำแนะนำการปรับพอร์ตตามข้อมูลปัจจุบัน`;
         break;
 
       case 'portfolio_summary':
@@ -60,11 +59,11 @@ export default async function handler(req, res) {
         break;
 
       case 'asset_analysis':
-        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" ค้นหาข้อมูลราคา ข่าวสาร หรือผลประกอบการล่าสุดจากเว็บ (แปลเป็นภาษาไทย) เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน แบบกระชับ`;
+        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน แบบกระชับ`;
         break;
 
       case 'news_analysis':
-        contextPrompt = `วิเคราะห์ผลกระทบของสถานการณ์/ข่าวต่อพอร์ต: "${userMessage}" ค้นหาข่าวสารล่าสุดจากแหล่งที่น่าเชื่อถือ (แปลเป็นภาษาไทย) สรุปผลกระทบและแนวทางรับมือสั้นๆ`;
+        contextPrompt = `วิเคราะห์ผลกระทบของสถานการณ์/ข่าวต่อพอร์ต: "${userMessage}" สรุปผลกระทบและแนวทางรับมือสั้นๆ`;
         break;
 
       case 'chat':
@@ -80,7 +79,7 @@ ${fileContext}
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 4. เรียกใช้งาน Gemini API พร้อมเปิดใช้งาน Google Search
+    // 4. เรียกใช้งาน Gemini API (แบบเสถียร ไม่ใช้ Search Tool เพื่อป้องกัน Error Quota)
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -91,12 +90,11 @@ ${fileContext}
       generationConfig: {
         temperature: 0.2,
         maxOutputTokens: 1000,
-      },
-      tools: [{ googleSearch: {} }]
+      }
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(geminiUrl, {
       method: 'POST',
@@ -118,26 +116,15 @@ ${fileContext}
     const candidate = data.candidates?.[0];
     const aiReply = candidate?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
 
-    let sources = [];
-    const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
-    if (groundingChunks && Array.isArray(groundingChunks)) {
-      sources = groundingChunks
-        .filter(chunk => chunk?.web?.uri && chunk?.web?.title)
-        .map(chunk => ({
-          title: chunk.web.title,
-          url: chunk.web.uri
-        }));
-    }
-
     return res.status(200).json({ 
       analysis: aiReply,
-      sources: sources 
+      sources: [] 
     });
 
   } catch (error) {
     if (error.name === 'AbortError') {
       return res.status(200).json({ 
-        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาค้นหาข้อมูลออนไลน์นานเกินไป กรุณาลองใหม่อีกครั้งครับ',
+        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาตอบกลับนานเกินไป กรุณาลองใหม่อีกครั้งครับ',
         sources: [] 
       });
     }
@@ -155,7 +142,6 @@ function summarizePortfolioForAI(portfolio) {
 
   const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
   
-  // สรุปข้อมูลสินทรัพย์เฉพาะตัวที่จำเป็น
   const simplifiedHoldings = holdings.map(h => ({
     name: h?.name || '',
     ticker: h?.ticker || '',
@@ -171,6 +157,5 @@ function summarizePortfolioForAI(portfolio) {
     fxRate: portfolio.fxRate || 36.5,
     holdingsCount: simplifiedHoldings.length,
     holdings: simplifiedHoldings,
-    // ตัดประวัติยาวๆ ออก ส่งเฉพาะภาพรวมเพื่อประหยัด Token
   };
 }
