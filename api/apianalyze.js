@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI (เสถียร ไม่ติดปัญหา Quota Search)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -17,20 +17,17 @@ export default async function handler(req, res) {
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
     if (!apiKey) {
-      return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ', sources: [] });
+      return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
 
-    // 1. ย่อและกรองข้อมูลพอร์ตให้กะทัดรัด ป้องกัน Token ลิมิต
-    const leanPortfolio = summarizePortfolioForAI(portfolio);
-
-    // 2. กำหนดกฎการตอบ
+    // 1. กำหนดกฎการตอบ: เน้นกระชับ ตรงประเด็น ขอเนื้อๆ ไม่เอาน้ำ ห้ามทักทายซ้ำซาก
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 กฎเหล็กเคร่งครัด:
-1. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
-2. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
-3. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
-4. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
+1. ห้ามใส่คำทักทายซ้ำซาก (เช่น "สวัสดีครับนักเดินทาง...") หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม คำทักทายให้มีเฉพาะตอนเปิดแชทครั้งแรกเท่านั้น
+2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
+3. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
+4. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
     `.trim();
 
     if (customPrompt) {
@@ -39,31 +36,31 @@ export default async function handler(req, res) {
 
     let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 3. จัดเตรียม Prompt ตาม Action
+    // 2. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้ตรงตามความต้องการ
     let contextPrompt = '';
     
     switch (action) {
       case 'greeting':
-        contextPrompt = 'ทักทายต้อนรับเข้าห้องแชทสั้นๆ และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ';
+        contextPrompt = 'ทักทายต้อนรับเข้าห้องแชทสั้นๆ และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ (ไม่เยิ่นเย้อ)';
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ ให้ตอบตาม 3 หัวข้อ:
-        1. สัดส่วนสินทรัพย์ปัจจุบันเทียบกับภาพรวม
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ (หุ้นไทย 50%, หุ้นต่างประเทศ 30%, ทองคำ 10%, คริปโต 10%) ให้ตอบตาม 3 หัวข้อนี้เท่านั้น:
+        1. สัดส่วนสินทรัพย์ปัจจุบัน (เปรียบเทียบภาพรวมแต่ละกลุ่มกับเป้าหมาย)
         2. การกระจายตัวและความเสี่ยงของพอร์ต
-        3. คำแนะนำการปรับพอร์ตตามข้อมูลปัจจุบัน`;
+        3. คำแนะนำว่าสินทรัพย์กลุ่มไหนมีสัดส่วนมากหรือน้อยเกินไป และควรปรับเพิ่มหรือลดกลุ่มไหน`;
         break;
 
       case 'portfolio_summary':
-        contextPrompt = 'สรุปภาพรวมผลตอบแทนและสถานะพอร์ตปัจจุบันแบบกระชับ ตรงประเด็น';
+        contextPrompt = 'สรุปภาพรวมผลตอบแทนประจำเดือนนี้: อัตรากำไร/ขาดทุนรวมจากเงินต้นทั้งหมด, การเติบโตเทียบกับเดือนก่อนหน้า และสรุปภาพรวมการซื้อขายแบบกระชับ ตรงประเด็น';
         break;
 
       case 'asset_analysis':
-        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน แบบกระชับ`;
+        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
         break;
 
       case 'news_analysis':
-        contextPrompt = `วิเคราะห์ผลกระทบของสถานการณ์/ข่าวต่อพอร์ต: "${userMessage}" สรุปผลกระทบและแนวทางรับมือสั้นๆ`;
+        contextPrompt = `วิเคราะห์ผลกระทบของสถานการณ์/ข่าวต่อพอร์ต: "${userMessage}" สรุปผลกระทบและแนวทางรับมือสั้นๆ พร้อมระบุแหล่งที่มา`;
         break;
 
       case 'chat':
@@ -73,33 +70,30 @@ export default async function handler(req, res) {
     }
 
     const fullUserPrompt = `
-ข้อมูลสรุปพอร์ตของผู้ใช้: ${JSON.stringify(leanPortfolio)}
+ข้อมูลพอร์ตปัจจุบันของผู้ใช้: ${JSON.stringify(portfolio || {})}
 ${fileContext}
 
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 4. เรียกใช้งาน Gemini API (แบบเสถียร ไม่ใช้ Search Tool เพื่อป้องกัน Error Quota)
-    const modelName = 'gemini-3.5-flash-lite';
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-
-    const requestBody = {
-      contents: [
-        { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullUserPrompt}` }] }
-      ],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 1000,
-      }
-    };
+    // 3. เรียกใช้งาน Gemini API (ใช้รุ่นที่เสถียรและรวดเร็ว)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     const response = await fetch(geminiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullUserPrompt}` }] }
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 1000,
+        }
+      }),
       signal: controller.signal
     });
 
@@ -108,54 +102,22 @@ ${fileContext}
 
     if (data.error) {
       return res.status(200).json({ 
-        analysis: `⚠️ Google API Error: ${data.error.message || JSON.stringify(data.error)}`,
-        sources: []
+        analysis: `⚠️ Google API Error: ${data.error.message || JSON.stringify(data.error)}` 
       });
     }
 
-    const candidate = data.candidates?.[0];
-    const aiReply = candidate?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
-
-    return res.status(200).json({ 
-      analysis: aiReply,
-      sources: [] 
-    });
+    const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
+    return res.status(200).json({ analysis: aiReply });
 
   } catch (error) {
     if (error.name === 'AbortError') {
       return res.status(200).json({ 
-        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาตอบกลับนานเกินไป กรุณาลองใหม่อีกครั้งครับ',
-        sources: [] 
+        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาตอบกลับนานเกินไป กรุณาลองใหม่อีกครั้งครับ' 
       });
     }
     console.error('[API Error]:', error);
     return res.status(200).json({ 
-      analysis: `⚠️ Server Error: ${error.message}`,
-      sources: [] 
+      analysis: `⚠️ Server Error: ${error.message}` 
     });
   }
-}
-
-// ฟังก์ชันย่อข้อมูลพอร์ตให้กะทัดรัด ป้องกัน Token ลิมิตเต็ม
-function summarizePortfolioForAI(portfolio) {
-  if (!portfolio) return { status: 'พอร์ตว่างเปล่า' };
-
-  const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
-  
-  const simplifiedHoldings = holdings.map(h => ({
-    name: h?.name || '',
-    ticker: h?.ticker || '',
-    type: h?.type || '',
-    qty: parseFloat(h?.quantity) || 0,
-    avgCost: parseFloat(h?.avgCost) || 0,
-    currentPrice: parseFloat(h?.currentPrice) || 0,
-    currency: h?.currency || 'THB'
-  }));
-
-  return {
-    initialCapital: portfolio.initialCapital || 0,
-    fxRate: portfolio.fxRate || 36.5,
-    holdingsCount: simplifiedHoldings.length,
-    holdings: simplifiedHoldings,
-  };
 }
