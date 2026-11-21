@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ฉบับสมบูรณ์ รองรับรายงานประจำเดือนและข้อความธรรมดา)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -33,16 +33,21 @@ export default async function handler(req, res) {
     });
     const currentTimeStr = formatter.format(now);
 
-    // 2. กำหนดกฎการตอบ: เน้นกระชับ ตรงประเด็น ขอเนื้อๆ ไม่เอาน้ำ ห้ามทักทายซ้ำซาก
+    // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ จากพอร์ตหลังบ้านโดยอัตโนมัติ
+    const processedData = extractAndComputePortfolioData(portfolio, now);
+
+    // 3. กำหนดกฎการตอบ (ห้ามใช้ Markdown เด็ดขาด และบังคับรูปแบบข้อความธรรมดา)
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr} (ห้ามเดาวันที่เอง)
 
-กฎเหล็กเคร่งครัด:
-1. ห้ามใส่คำทักทายซ้ำซาก (เช่น "สวัสดีครับนักเดินทาง...") หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม คำทักทายให้มีเฉพาะตอนเปิดแชทครั้งแรกเท่านั้น
-2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
-3. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
-4. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
+กฎเหล็กรูปแบบการตอบ (สำคัญมาก ห้ามฝ่าฝืน):
+1. ตอบเป็นข้อความธรรมดาเท่านั้น ห้ามใช้เครื่องหมาย Markdown ใดๆ ทั้งสิ้น เช่น ห้ามใช้ ** (ตัวหนา), ห้ามใช้ ## (หัวข้อ), ห้ามใช้ \` (โค้ด), ห้ามใช้ | (เส้นตาราง) หรือทำตารางเด็ดขาด
+2. ใช้หัวข้อเป็นตัวหนังสือธรรมดาตามด้วยเครื่องหมาย : และเว้นบรรทัดระหว่างหัวข้อ
+3. ใช้เครื่องหมาย - นำหน้ารายการย่อยได้ ตัวเลขเงินและเปอร์เซ็นต์ต้องมีคอมม่าและหน่วยชัดเจน (เช่น 1,250,000 บาท, 12.5%)
+4. ความยาวพอเหมาะ อ่านจบในไม่เกิน 1 นาที ประโยคสั้น เน้นข้อสรุปก่อนรายละเอียด
+5. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
+6. หากข้อมูลส่วนใดในระบบไม่มีหรือเป็นค่า null ให้ระบุไว้ท้ายคำตอบในบรรทัดสุดท้ายขึ้นต้นด้วยหัวข้อ: ข้อมูลที่ยังไม่ครบ: (ตามด้วยรายการที่ขาดหาย)
     `.trim();
 
     if (customPrompt) {
@@ -51,7 +56,7 @@ export default async function handler(req, res) {
 
     let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 3. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้ตรงตามความต้องการ
+    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
     let contextPrompt = '';
     
     switch (action) {
@@ -60,22 +65,36 @@ export default async function handler(req, res) {
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก ให้ตอบตาม 6 หัวข้อนี้อย่างเคร่งครัด:
-        1. ภาพรวมพอร์ต: มูลค่ารวม ต้นทุน กำไร/ขาดทุน (บาท/%) ณ วันที่ปัจจุบัน
-        2. สัดส่วนสินทรัพย์: แยกตามประเภท (หุ้นไทย/หุ้นนอก/กองทุน/ทอง/คริปโต/เงินสด) พร้อมระบุว่าประเภทไหนมากสุด
-        3. ความกระจุกตัว: 
-           - สัดส่วนเป้าหมายที่ตั้งไว้ (หุ้นไทย 50%, หุ้นนอก+DR 30%, ทองคำ 10%, คริปโต 10%) หากกลุ่มไหนเกินให้แจ้งเตือน
-           - สินทรัพย์รายตัวที่มีสัดส่วนเกิน 20% ของพอร์ต (ถ้ามี) ระบุชื่อและ %
-           - 3 อันดับแรกรวมกันกี่ %
-           - กลุ่มอุตสาหกรรมที่กระจุกตัว (จากฟิลด์ industry)
-           - หากมีหุ้นต่างประเทศหรือ DR หลายตัวในธีมเดียวกัน (เช่น เทคโนโลยีสหรัฐฯ) ให้ชี้ว่าซ้อนทับกัน
-        4. ความเสี่ยงหลัก: จัดลำดับ 3 ข้อ แต่ละข้อมีเหตุผลสั้นๆ (ความเสี่ยงตลาด, สภาพคล่อง/เงินสดต่ำหรือสูงเกินไป, ความผันผวนของคริปโต/ทอง, ค่าเงิน, ค่าธรรมเนียม)
-        5. จุดแข็งของพอร์ต: 1-2 ข้อ
-        6. ข้อพิจารณาปรับพอร์ต: 1-3 ข้อ เรียงตามความสำคัญ แต่ละข้อบอกเหตุผลและสิ่งที่ควรระวัง (เช่น สัดส่วน, จังหวะราคา)`;
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก ให้ตอบตามหัวข้อด้วยข้อความธรรมดา:
+1. ภาพรวมพอร์ต: มูลค่ารวม ต้นทุน กำไร/ขาดทุน (บาท/%) ณ วันที่ปัจจุบัน
+2. สัดส่วนสินทรัพย์: แยกตามประเภท (หุ้นไทย th_stock, หุ้นนอก foreign_stock, กองทุน fund, ทองคำ gold, คริปโต crypto, เงินสด cash) พร้อมระบุว่าประเภทไหนมากสุด
+3. ความกระจุกตัว: 
+- สัดส่วนเป้าหมายที่ตั้งไว้ (หุ้นไทย 50%, หุ้นนอก+DR 30%, ทองคำ 10%, คริปโต 10%) หากกลุ่มไหนเกินให้แจ้งเตือน
+- สินทรัพย์รายตัวที่มีสัดส่วนเกิน 20% ของพอร์ต (ถ้ามี) ระบุชื่อและ %
+- 3 อันดับแรกรวมกันกี่ %
+- กลุ่มอุตสาหกรรมที่กระจุกตัว (จากฟิลด์ industry)
+- หากมีหุ้นต่างประเทศหรือ DR หลายตัวในธีมเดียวกัน ให้ชี้ว่าซ้อนทับกัน
+4. ความเสี่ยงหลัก: จัดลำดับ 3 ข้อ แต่ละข้อมีเหตุผลสั้นๆ (ความเสี่ยงตลาด, สภาพคล่อง, ความผันผวน, ค่าเงิน, ค่าธรรมเนียม)
+5. จุดแข็งของพอร์ต: 1-2 ข้อ
+6. ข้อพิจารณาปรับพอร์ต: 1-3 ข้อ เรียงตามความสำคัญ แต่ละข้อบอกเหตุผลและสิ่งที่ควรระวัง`;
         break;
 
       case 'portfolio_summary':
-        contextPrompt = 'สรุปภาพรวมผลตอบแทนประจำเดือนนี้: อัตรากำไร/ขาดทุนรวมจากเงินต้นทั้งหมด, การเติบโตเทียบกับเดือนก่อนหน้า และสรุปภาพรวมการซื้อขายแบบกระชับ ตรงประเด็น';
+        contextPrompt = `สรุปภาพรวมผลตอบแทนประจำเดือนนี้ โดยอิงจากข้อมูลที่คำนวณมาให้:
+1. ช่วงเวลา: ระบุเดือนและปีปัจจุบัน
+2. การซื้อขายในเดือนนี้:
+- จำนวนรายการซื้อ / จำนวนรายการขาย
+- รายชื่อสินทรัพย์ที่ซื้อและที่ขาย (ระบุ ชื่อ, จำนวน, ราคา, วันที่)
+- มูลค่าเงินซื้อรวม / มูลค่าเงินขายรวม (บาท)
+- ค่าธรรมเนียมรวม (บาท)
+3. กำไร/ขาดทุนเดือนนี้:
+- กำไร/ขาดทุนที่รับรู้จากการขาย (บาท) แยกรายตัว
+4. การเติบโตของพอร์ต:
+- เทียบสิ้นเดือนก่อน (จากประวัติ history)
+- เทียบช่วงเดียวกันของปีที่แล้ว หรือสิ้นปีที่แล้ว (จาก yearlyHistory) เป็น %
+- แยกให้ชัดเจนว่าการเติบโตมาจากเงินทุนที่เติมเข้ามา (capital_add) หรือจากผลตอบแทนจริง
+- หากไม่มีข้อมูลเดือนก่อนหรือปีก่อน ให้ระบุว่า "ยังไม่มีข้อมูลเปรียบเทียบ" ห้ามประมาณเอง
+5. ข้อสังเกตสั้นๆ 2-3 ข้อ (เช่น ซื้อบ่อยเกินไปไหม ค่าธรรมเนียมสูงเมื่อเทียบกำไรไหม)`;
         break;
 
       case 'asset_analysis':
@@ -93,17 +112,18 @@ export default async function handler(req, res) {
     }
 
     const fullUserPrompt = `
-ข้อมูลพอร์ตปัจจุบันของผู้ใช้: ${JSON.stringify(portfolio || {})}
+ข้อมูลพอร์ตและสถิติที่ประมวลผลแล้ว: ${JSON.stringify(processedData)}
 ${fileContext}
 
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 4. เรียกใช้งาน Gemini API (ใช้รุ่นที่เสถียรและรวดเร็ว)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
+    // 5. เรียกใช้งาน Gemini API
+    const modelName = 'gemini-3.5-flash-lite';
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(geminiUrl, {
       method: 'POST',
@@ -143,4 +163,75 @@ ${fileContext}
       analysis: `⚠️ Server Error: ${error.message}` 
     });
   }
+}
+
+// ฟังก์ชันดึงและคำนวณข้อมูลพอร์ตรายเดือนและประวัติเชิงลึก (Backend Data Extraction)
+function extractAndComputePortfolioData(portfolio, currentDate) {
+  if (!portfolio) {
+    return { status: 'พอร์ตว่างเปล่า' };
+  }
+
+  const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
+  const tradeLogs = Array.isArray(portfolio.tradeLogs) ? portfolio.tradeLogs : [];
+  const cashLedger = Array.isArray(portfolio.cashLedger) ? portfolio.cashLedger : [];
+  const history = Array.isArray(portfolio.history) ? portfolio.history : [];
+  const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
+
+  // กรองรายการซื้อขายของเดือนปัจจุบัน (YYYY-MM)
+  const year = currentDate.getFullYear();
+  const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+  const currentMonthPrefix = `${year}-${month}`;
+
+  const currentMonthTrades = tradeLogs.filter(l => l && l.date && typeof l.date === 'string' && l.date.startsWith(currentMonthPrefix));
+  const buyTrades = currentMonthTrades.filter(l => l && l.action === 'buy');
+  const sellTrades = currentMonthTrades.filter(l => l && l.action === 'sell');
+
+  // คำนวณกำไร/ขาดทุนที่รับรู้จากการขายในเดือนนี้แยกรายตัว
+  const realizedPnLPerAsset = {};
+  sellTrades.forEach(l => {
+    const ticker = l.ticker || l.name || 'Unknown';
+    const pnl = parseFloat(l.realizedPnL || l.pnlThb || 0);
+    realizedPnLPerAsset[ticker] = (realizedPnLPerAsset[ticker] || 0) + pnl;
+  });
+
+  // แยกแยะการเติบโตจากเงินทุนเติมเข้า (capital_add) vs ผลตอบแทน
+  const monthCapitalAdd = cashLedger
+    .filter(e => e && e.type === 'capital_add' && e.date && e.date.startsWith(currentMonthPrefix))
+    .reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+
+  return {
+    rawPortfolioSummary: {
+      cash: portfolio.cashBalance ?? portfolio.currentCash ?? portfolio.cash ?? 0,
+      initialCapital: portfolio.initialCapital ?? 0,
+      totalInvestedCost: portfolio.totalInvestedCost ?? 0,
+      totalGain: portfolio.totalGain ?? 0,
+      dividend: portfolio.dividend ?? 0,
+      rebalance: portfolio.rebalance ?? 0
+    },
+    currentMonthTrading: {
+      month: currentMonthPrefix,
+      buyCount: buyTrades.length,
+      sellCount: sellTrades.length,
+      buyList: buyTrades.map(t => ({ name: t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
+      sellList: sellTrades.map(t => ({ name: t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
+      totalBuyValue: buyTrades.reduce((s, t) => s + ((t.quantity || 0) * (t.price || 0)), 0),
+      totalSellValue: sellTrades.reduce((s, t) => s + ((t.quantity || 0) * (t.price || 0)), 0),
+      totalFee: currentMonthTrades.reduce((s, t) => s + (parseFloat(t.feeThbRecord || t.fee) || 0), 0),
+      realizedPnLPerAsset: realizedPnLPerAsset,
+      capitalAddedThisMonth: monthCapitalAdd
+    },
+    holdings: holdings.map(h => ({
+      name: h?.name || '',
+      ticker: h?.ticker || '',
+      type: h?.type || 'other', // th_stock, foreign_stock, fund, gold, crypto, cash
+      instrumentType: h?.instrumentType || 'stock', // stock, dr, etf
+      industry: h?.industry || 'อื่นๆ',
+      quantity: h?.quantity || 0,
+      avgCost: h?.avgCost || 0,
+      currentPrice: h?.currentPrice || 0,
+      totalCostThb: h?.totalCostThb || 0
+    })),
+    history: history.length > 0 ? history.slice(-3) : null,
+    yearlyHistory: yearlyHistory.length > 0 ? yearlyHistory.slice(-3) : null
+  };
 }
