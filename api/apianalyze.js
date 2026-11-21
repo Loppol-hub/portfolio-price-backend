@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ฉบับสมบูรณ์ รองรับรายงานประจำเดือนและข้อความธรรมดา)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ปรับปรุงความกระชับคำสั่งและรูปแบบการขึ้นบรรทัดใหม่)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -36,18 +36,19 @@ export default async function handler(req, res) {
     // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ จากพอร์ตหลังบ้านโดยอัตโนมัติ
     const processedData = extractAndComputePortfolioData(portfolio, now);
 
-    // 3. กำหนดกฎการตอบ (ห้ามใช้ Markdown เด็ดขาด และบังคับรูปแบบข้อความธรรมดา)
+    // 3. กำหนดกฎการตอบ (ห้ามใช้ Markdown และบังคับขึ้นบรรทัดใหม่สำหรับรายการย่อย)
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr} (ห้ามเดาวันที่เอง)
 
 กฎเหล็กรูปแบบการตอบ (สำคัญมาก ห้ามฝ่าฝืน):
 1. ตอบเป็นข้อความธรรมดาเท่านั้น ห้ามใช้เครื่องหมาย Markdown ใดๆ ทั้งสิ้น เช่น ห้ามใช้ ** (ตัวหนา), ห้ามใช้ ## (หัวข้อ), ห้ามใช้ \` (โค้ด), ห้ามใช้ | (เส้นตาราง) หรือทำตารางเด็ดขาด
-2. ใช้หัวข้อเป็นตัวหนังสือธรรมดาตามด้วยเครื่องหมาย : และเว้นบรรทัดระหว่างหัวข้อ
-3. ใช้เครื่องหมาย - นำหน้ารายการย่อยได้ ตัวเลขเงินและเปอร์เซ็นต์ต้องมีคอมม่าและหน่วยชัดเจน (เช่น 1,250,000 บาท, 12.5%)
-4. ความยาวพอเหมาะ อ่านจบในไม่เกิน 1 นาที ประโยคสั้น เน้นข้อสรุปก่อนรายละเอียด
-5. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
-6. หากข้อมูลส่วนใดในระบบไม่มีหรือเป็นค่า null ให้ระบุไว้ท้ายคำตอบในบรรทัดสุดท้ายขึ้นต้นด้วยหัวข้อ: ข้อมูลที่ยังไม่ครบ: (ตามด้วยรายการที่ขาดหาย)
+2. ใช้หัวข้อเป็นตัวหนังสือธรรมดาตามด้วยเครื่องหมาย : และต้องขึ้นบรรทัดใหม่เสมอ
+3. ทุกรายการย่อย (ที่มีเครื่องหมาย - นำหน้า) ต้องขึ้นบรรทัดใหม่ทุกข้อ ห้ามเขียนต่อกันเป็นพืดในบรรทัดเดียว
+4. ตัวเลขเงินและเปอร์เซ็นต์ต้องมีคอมม่าและหน่วยชัดเจน (เช่น 1,250,000 บาท, 12.5%)
+5. ความยาวพอเหมาะ อ่านจบในไม่เกิน 1 นาที ประโยคสั้น เน้นข้อสรุปก่อนรายละเอียด
+6. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
+7. หากข้อมูลส่วนใดในระบบไม่มีหรือเป็นค่า null ให้ระบุไว้ท้ายคำตอบในบรรทัดสุดท้ายขึ้นต้นด้วยหัวข้อ: ข้อมูลที่ยังไม่ครบ: (ตามด้วยรายการที่ขาดหาย)
     `.trim();
 
     if (customPrompt) {
@@ -56,18 +57,18 @@ export default async function handler(req, res) {
 
     let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
+    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้กระชับ ตัดคำฟุ่มเฟือยออก
     let contextPrompt = '';
     
     switch (action) {
       case 'greeting':
-        contextPrompt = 'ทักทายสั้นๆ 1 ประโยค แล้วสรุปสถานะพอร์ตวันนี้ไม่เกิน 4 บรรทัด: มูลค่ารวม, กำไร/ขาดทุนที่ยังไม่รับรู้ (บาทและ %), สัดส่วนเงินสด, และสินทรัพย์ที่ขึ้น/ลงมากที่สุด';
+        contextPrompt = 'สรุปสถานะพอร์ตวันนี้ไม่เกิน 4 บรรทัด: มูลค่ารวม, กำไร/ขาดทุนที่ยังไม่รับรู้ (บาทและ %), สัดส่วนเงินสด, และสินทรัพย์ที่ขึ้น/ลงมากที่สุด';
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก ให้ตอบตามหัวข้อด้วยข้อความธรรมดา:
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก ให้ตอบตามหัวข้อด้วยข้อความธรรมดาและขึ้นบรรทัดใหม่ทุกรายการย่อย:
 1. ภาพรวมพอร์ต: มูลค่ารวม ต้นทุน กำไร/ขาดทุน (บาท/%) ณ วันที่ปัจจุบัน
-2. สัดส่วนสินทรัพย์: แยกตามประเภท (หุ้นไทย th_stock, หุ้นนอก foreign_stock, กองทุน fund, ทองคำ gold, คริปโต crypto, เงินสด cash) พร้อมระบุว่าประเภทไหนมากสุด
+2. สัดส่วนสินทรัพย์: แยกตามประเภท (หุ้นไทย th_stock, หุ้นนอก foreign_stock, กองทุน fund, ทองคำ gold, คริปโต crypto, เงินสด cash) พร้อมระบุประเภทที่มากที่สุด
 3. ความกระจุกตัว: 
 - สัดส่วนเป้าหมายที่ตั้งไว้ (หุ้นไทย 50%, หุ้นนอก+DR 30%, ทองคำ 10%, คริปโต 10%) หากกลุ่มไหนเกินให้แจ้งเตือน
 - สินทรัพย์รายตัวที่มีสัดส่วนเกิน 20% ของพอร์ต (ถ้ามี) ระบุชื่อและ %
@@ -80,7 +81,7 @@ export default async function handler(req, res) {
         break;
 
       case 'portfolio_summary':
-        contextPrompt = `สรุปภาพรวมผลตอบแทนประจำเดือนนี้ โดยอิงจากข้อมูลที่คำนวณมาให้:
+        contextPrompt = `สรุปผลตอบแทนประจำเดือนนี้ โดยอิงจากข้อมูลที่คำนวณมาให้:
 1. ช่วงเวลา: ระบุเดือนและปีปัจจุบัน
 2. การซื้อขายในเดือนนี้:
 - จำนวนรายการซื้อ / จำนวนรายการขาย
@@ -94,15 +95,15 @@ export default async function handler(req, res) {
 - เทียบช่วงเดียวกันของปีที่แล้ว หรือสิ้นปีที่แล้ว (จาก yearlyHistory) เป็น %
 - แยกให้ชัดเจนว่าการเติบโตมาจากเงินทุนที่เติมเข้ามา (capital_add) หรือจากผลตอบแทนจริง
 - หากไม่มีข้อมูลเดือนก่อนหรือปีก่อน ให้ระบุว่า "ยังไม่มีข้อมูลเปรียบเทียบ" ห้ามประมาณเอง
-5. ข้อสังเกตสั้นๆ 2-3 ข้อ (เช่น ซื้อบ่อยเกินไปไหม ค่าธรรมเนียมสูงเมื่อเทียบกำไรไหม)`;
+5. ข้อสังเกตสั้นๆ 2-3 ข้อ`;
         break;
 
       case 'asset_analysis':
-        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
+        contextPrompt = `วิเคราะห์สินทรัพย์ ${userMessage} เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
         break;
 
       case 'news_analysis':
-        contextPrompt = `วิเคราะห์ผลกระทบของสถานการณ์/ข่าวต่อพอร์ต: "${userMessage}" สรุปผลกระทบและแนวทางรับมือสั้นๆ พร้อมระบุแหล่งที่มา`;
+        contextPrompt = `วิเคราะห์ผลกระทบของข่าว ${userMessage} ต่อพอร์ต สรุปผลกระทบและแนวทางรับมือสั้นๆ พร้อมระบุแหล่งที่มา`;
         break;
 
       case 'chat':
@@ -177,7 +178,6 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   const history = Array.isArray(portfolio.history) ? portfolio.history : [];
   const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
 
-  // กรองรายการซื้อขายของเดือนปัจจุบัน (YYYY-MM)
   const year = currentDate.getFullYear();
   const month = String(currentDate.getMonth() + 1).padStart(2, '0');
   const currentMonthPrefix = `${year}-${month}`;
@@ -186,7 +186,6 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   const buyTrades = currentMonthTrades.filter(l => l && l.action === 'buy');
   const sellTrades = currentMonthTrades.filter(l => l && l.action === 'sell');
 
-  // คำนวณกำไร/ขาดทุนที่รับรู้จากการขายในเดือนนี้แยกรายตัว
   const realizedPnLPerAsset = {};
   sellTrades.forEach(l => {
     const ticker = l.ticker || l.name || 'Unknown';
@@ -194,7 +193,6 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
     realizedPnLPerAsset[ticker] = (realizedPnLPerAsset[ticker] || 0) + pnl;
   });
 
-  // แยกแยะการเติบโตจากเงินทุนเติมเข้า (capital_add) vs ผลตอบแทน
   const monthCapitalAdd = cashLedger
     .filter(e => e && e.type === 'capital_add' && e.date && e.date.startsWith(currentMonthPrefix))
     .reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
@@ -223,8 +221,8 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
     holdings: holdings.map(h => ({
       name: h?.name || '',
       ticker: h?.ticker || '',
-      type: h?.type || 'other', // th_stock, foreign_stock, fund, gold, crypto, cash
-      instrumentType: h?.instrumentType || 'stock', // stock, dr, etf
+      type: h?.type || 'other',
+      instrumentType: h?.instrumentType || 'stock',
       industry: h?.industry || 'อื่นๆ',
       quantity: h?.quantity || 0,
       avgCost: h?.avgCost || 0,
