@@ -1,112 +1,123 @@
-// ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์ (ปรับลดขนาดข้อมูลเพื่อป้องกันโควต้าเต็ม)
-function processPortfolioData(portfolio) {
-  if (!portfolio) {
-    return { status: 'พอร์ตว่างเปล่า' };
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
-  const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
-  const rawTradeLogs = Array.isArray(portfolio.tradeLogs) ? portfolio.tradeLogs : [];
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-  const tradeLogs = rawTradeLogs.filter(l => l && l.date && new Date(l.date) >= oneYearAgo);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  const cashLedger = Array.isArray(portfolio.cashLedger) ? portfolio.cashLedger : [];
-  const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
-  const initialCapital = parseFloat(portfolio.initialCapital) || 0;
-  const fxRate = parseFloat(portfolio.fxRate) || 36.5;
+  try {
+    const { action, portfolio, userMessage, customPrompt, fileContent } = req.body;
 
-  let totalInvestedValue = 0;
-  let totalInvestedCost = 0;
-  const typeValues = {};
-  const industryValues = {};
-  let usdAssetsValue = 0;
-
-  const enrichedHoldings = holdings.map(h => {
-    const qty = parseFloat(h?.quantity) || 0;
-    const avg = parseFloat(h?.avgCost) || 0;
-    const price = parseFloat(h?.currentPrice) || 0;
-    const currency = h?.currency === 'USD' ? 'USD' : 'THB';
-    const isDr = h?.instrumentType === 'dr';
-
-    const effRate = (currency === 'USD' && !isDr) ? fxRate : 1;
-    const marketValue = qty * price * effRate;
-    
-    const fixedRate = (currency === 'USD' && !isDr) ? (parseFloat(h?.createdFxRate) || fxRate) : 1;
-    const costValue = h?.totalCostThb !== undefined && h?.totalCostThb !== null 
-      ? parseFloat(h.totalCostThb) 
-      : (qty * avg * fixedRate);
-
-    const gain = marketValue - costValue;
-    const gainPct = costValue > 0 ? (gain / costValue) * 100 : 0;
-
-    if (h?.type !== 'cash') {
-      totalInvestedValue += marketValue;
-      totalInvestedCost += costValue;
-      
-      const typeKey = (h?.type === 'th_stock' && h?.instrumentType === 'dr') ? 'foreign_stock' : (h?.type || 'other');
-      typeValues[typeKey] = (typeValues[typeKey] || 0) + marketValue;
-
-      const ind = (h?.industry && typeof h.industry === 'string' && h.industry.trim()) || 'อื่นๆ';
-      industryValues[ind] = (industryValues[ind] || 0) + marketValue;
-
-      if (currency === 'USD' && !isDr) {
-        usdAssetsValue += marketValue;
-      }
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) {
+      return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
 
-    // ส่งเฉพาะข้อมูลสรุปสั้นๆ ของแต่ละตัว ไม่ส่ง Object ดิบทั้งหมดเพื่อประหยัด Token
-    return {
-      name: h.name,
-      ticker: h.ticker,
-      type: h.type,
-      qty,
-      avg,
-      price,
-      marketValue: Math.round(marketValue),
-      gainPct: parseFloat(gainPct.toFixed(2))
-    };
-  });
+    // 1. กำหนดกฎการตอบ: เน้นกระชับ ตรงประเด็น ขอเนื้อๆ ไม่เอาน้ำ ห้ามทักทายซ้ำซาก
+    let systemInstruction = `
+คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
+กฎเหล็กเคร่งครัด:
+1. ห้ามใส่คำทักทายซ้ำซาก (เช่น "สวัสดีครับนักเดินทาง...") หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม คำทักทายให้มีเฉพาะตอนเปิดแชทครั้งแรกเท่านั้น
+2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
+3. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
+4. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
+    `.trim();
 
-  const capitalAdd = cashLedger.filter(e => e && e.type === 'capital_add').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const capitalReduce = cashLedger.filter(e => e && e.type === 'capital_reduce').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const capitalAdj = capitalAdd - capitalReduce;
-  const totalCapital = initialCapital + capitalAdj;
+    if (customPrompt) {
+      systemInstruction += `\n\nกติกาเพิ่มเติมจากผู้ใช้:\n${customPrompt}`;
+    }
 
-  const profits = cashLedger.filter(e => e && e.type === 'profit').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const losses = cashLedger.filter(e => e && (e.type === 'loss' || e.type === 'fee')).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const dividends = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const rebalances = cashLedger.filter(e => e && e.type === 'rebalance').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-  const performanceTotal = profits - losses;
-  const cashAdj = performanceTotal + dividends + rebalances;
-  const computedCash = totalCapital - totalInvestedCost + cashAdj;
-  const totalAssetValue = totalInvestedValue + computedCash;
+    // 2. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้ตรงตามความต้องการ
+    let contextPrompt = '';
+    
+    switch (action) {
+      case 'greeting':
+        contextPrompt = 'ทักทายต้อนรับเข้าห้องแชทสั้นๆ และสรุปสุขภาพพอร์ตภาพรวมแบบกระชับ (ไม่เยิ่นเย้อ)';
+        break;
 
-  const totalGain = totalInvestedValue - totalInvestedCost;
-  const totalGainPct = totalInvestedCost > 0 ? (totalGain / totalInvestedCost) * 100 : 0;
+      case 'deep_analysis':
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ (หุ้นไทย 50%, หุ้นต่างประเทศ 30%, ทองคำ 10%, คริปโต 10%) ให้ตอบตาม 3 หัวข้อนี้เท่านั้น:
+        1. สัดส่วนสินทรัพย์ปัจจุบัน (เปรียบเทียบภาพรวมแต่ละกลุ่มกับเป้าหมาย)
+        2. การกระจายตัวและความเสี่ยงของพอร์ต
+        3. คำแนะนำว่าสินทรัพย์กลุ่มไหนมีสัดส่วนมากหรือน้อยเกินไป และควรปรับเพิ่มหรือลดกลุ่มไหน`;
+        break;
 
-  const currentMonthPrefix = new Date().toISOString().slice(0, 7);
-  const currentMonthLogs = tradeLogs.filter(l => l && l.date && typeof l.date === 'string' && l.date.startsWith(currentMonthPrefix));
-  
-  return {
-    totalAssetValue: Math.round(totalAssetValue),
-    totalInvestedValue: Math.round(totalInvestedValue),
-    totalInvestedCost: Math.round(totalInvestedCost),
-    computedCash: Math.round(computedCash),
-    totalGain: Math.round(totalGain),
-    totalGainPct: parseFloat(totalGainPct.toFixed(2)),
-    totalCapital: Math.round(totalCapital),
-    fxRate,
-    holdingsCount: enrichedHoldings.length,
-    typeBreakdown: typeValues,
-    industryBreakdown: industryValues,
-    usdExposurePct: parseFloat((totalAssetValue > 0 ? (usdAssetsValue / totalAssetValue) * 100 : 0).toFixed(2)),
-    cashRatioPct: parseFloat((totalInvestedValue > 0 ? (computedCash / totalInvestedValue) * 100 : 0).toFixed(2)),
-    currentMonthSummary: {
-      month: currentMonthPrefix,
-      totalTransactions: currentMonthLogs.length,
-    },
-    holdings: enrichedHoldings,
-    yearlyHistory: yearlyHistory.length > 0 ? yearlyHistory.slice(-3) : null
-  };
+      case 'portfolio_summary':
+        contextPrompt = 'สรุปภาพรวมผลตอบแทนประจำเดือนนี้: อัตรากำไร/ขาดทุนรวมจากเงินต้นทั้งหมด, การเติบโตเทียบกับเดือนก่อนหน้า และสรุปภาพรวมการซื้อขายแบบกระชับ ตรงประเด็น';
+        break;
+
+      case 'asset_analysis':
+        contextPrompt = `วิเคราะห์สินทรัพย์ตามที่ผู้ใช้ระบุ: "${userMessage}" เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
+        break;
+
+      case 'news_analysis':
+        contextPrompt = `วิเคราะห์ผลกระทบของสถานการณ์/ข่าวต่อพอร์ต: "${userMessage}" สรุปผลกระทบและแนวทางรับมือสั้นๆ พร้อมระบุแหล่งที่มา`;
+        break;
+
+      case 'chat':
+      default:
+        contextPrompt = userMessage || 'ให้คำปรึกษาทั่วไปเกี่ยวกับการลงทุนแบบกระชับ ตรงประเด็น';
+        break;
+    }
+
+    const fullUserPrompt = `
+ข้อมูลพอร์ตปัจจุบันของผู้ใช้: ${JSON.stringify(portfolio || {})}
+${fileContext}
+
+คำสั่ง: ${contextPrompt}
+    `.trim();
+
+    // 3. เรียกใช้งาน Gemini API (ใช้รุ่นที่เสถียรและรวดเร็ว)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullUserPrompt}` }] }
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 1000,
+        }
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    const data = await response.json();
+
+    if (data.error) {
+      return res.status(200).json({ 
+        analysis: `⚠️ Google API Error: ${data.error.message || JSON.stringify(data.error)}` 
+      });
+    }
+
+    const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
+    return res.status(200).json({ analysis: aiReply });
+
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return res.status(200).json({ 
+        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาตอบกลับนานเกินไป กรุณาลองใหม่อีกครั้งครับ' 
+      });
+    }
+    console.error('[API Error]:', error);
+    return res.status(200).json({ 
+      analysis: `⚠️ Server Error: ${error.message}` 
+    });
+  }
 }
