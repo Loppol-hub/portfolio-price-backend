@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ปรับปรุงความกระชับคำสั่งและรูปแบบการขึ้นบรรทัดใหม่)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (เชื่อมโยงฟิลด์ตรงกับ Frontend)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     });
     const currentTimeStr = formatter.format(now);
 
-    // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ จากพอร์ตหลังบ้านโดยอัตโนมัติ
+    // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ จากพอร์ตหลังบ้านให้ตรงกับโครงสร้าง Frontend
     const processedData = extractAndComputePortfolioData(portfolio, now);
 
     // 3. กำหนดกฎการตอบ (ห้ามใช้ Markdown และบังคับขึ้นบรรทัดใหม่สำหรับรายการย่อย)
@@ -55,7 +55,7 @@ export default async function handler(req, res) {
       systemInstruction += `\n\nกติกาเพิ่มเติมจากผู้ใช้:\n${customPrompt}`;
     }
 
-    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
+    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContext}` : '';
 
     // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้กระชับ ตัดคำฟุ่มเฟือยออก
     let contextPrompt = '';
@@ -166,7 +166,7 @@ ${fileContext}
   }
 }
 
-// ฟังก์ชันดึงและคำนวณข้อมูลพอร์ตรายเดือนและประวัติเชิงลึก (Backend Data Extraction)
+// ฟังก์ชันดึงและคำนวณข้อมูลพอร์ตให้ตรงกับโครงสร้าง Frontend (จับคู่ชื่อฟิลด์จริง)
 function extractAndComputePortfolioData(portfolio, currentDate) {
   if (!portfolio) {
     return { status: 'พอร์ตว่างเปล่า' };
@@ -178,6 +178,41 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   const history = Array.isArray(portfolio.history) ? portfolio.history : [];
   const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
 
+  const initialCapital = parseFloat(portfolio.initialCapital) || 0;
+  const fxRate = parseFloat(portfolio.fxRate) || 36.5;
+
+  // คำนวณเงินสด (computedCash) และตัวเลขการเงินตามหลักการเดียวกับหน้าจอ Frontend
+  const capitalAdd = cashLedger.filter(e => e && e.type === 'capital_add').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  const capitalReduce = cashLedger.filter(e => e && e.type === 'capital_reduce').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  const totalCapital = initialCapital + (capitalAdd - capitalReduce);
+
+  let totalInvestedCost = 0;
+  let totalInvestedValue = 0;
+  holdings.forEach(h => {
+    if (!h || h.type === 'cash') return;
+    const qty = parseFloat(h.quantity) || 0;
+    const avg = parseFloat(h.avgCost) || 0;
+    const price = parseFloat(h.currentPrice) || 0;
+    const currency = h.currency === 'USD' ? 'USD' : 'THB';
+    const isDr = h.instrumentType === 'dr';
+    const effRate = (currency === 'USD' && !isDr) ? fxRate : 1;
+    const fixedRate = (currency === 'USD' && !isDr) ? (parseFloat(h.createdFxRate) || fxRate) : 1;
+    const costVal = h.totalCostThb !== undefined && h.totalCostThb !== null ? parseFloat(h.totalCostThb) : (qty * avg * fixedRate);
+    totalInvestedCost += costVal;
+    totalInvestedValue += qty * price * effRate;
+  });
+
+  const performanceTotal = cashLedger.filter(e => e && e.type === 'profit').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0)
+    - cashLedger.filter(e => e && (e.type === 'loss' || e.type === 'fee')).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  
+  const dividendsTotal = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  const rebalancesTotal = cashLedger.filter(e => e && e.type === 'rebalance').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  const cashAdjTotal = performanceTotal + dividendsTotal + rebalancesTotal;
+
+  const computedCash = portfolio.cashBalance !== undefined ? parseFloat(portfolio.cashBalance) : (totalCapital - totalInvestedCost + cashAdjTotal);
+  const totalAssetValue = totalInvestedValue + computedCash;
+  const totalGain = totalInvestedValue - totalInvestedCost;
+
   const year = currentDate.getFullYear();
   const month = String(currentDate.getMonth() + 1).padStart(2, '0');
   const currentMonthPrefix = `${year}-${month}`;
@@ -188,8 +223,8 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
 
   const realizedPnLPerAsset = {};
   sellTrades.forEach(l => {
-    const ticker = l.ticker || l.name || 'Unknown';
-    const pnl = parseFloat(l.realizedPnL || l.pnlThb || 0);
+    const ticker = l.ticker || l.assetName || 'Unknown';
+    const pnl = parseFloat(l.pnlThb || l.pnl || 0);
     realizedPnLPerAsset[ticker] = (realizedPnLPerAsset[ticker] || 0) + pnl;
   });
 
@@ -199,19 +234,21 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
 
   return {
     rawPortfolioSummary: {
-      cash: portfolio.cashBalance ?? portfolio.currentCash ?? portfolio.cash ?? 0,
-      initialCapital: portfolio.initialCapital ?? 0,
-      totalInvestedCost: portfolio.totalInvestedCost ?? 0,
-      totalGain: portfolio.totalGain ?? 0,
-      dividend: portfolio.dividend ?? 0,
-      rebalance: portfolio.rebalance ?? 0
+      cash: computedCash,
+      initialCapital: totalCapital,
+      investedAmount: totalInvestedCost,
+      totalGain: totalGain,
+      dividend: dividendsTotal,
+      performanceTotal: performanceTotal,
+      rebalance: rebalancesTotal,
+      totalAssetValue: totalAssetValue
     },
     currentMonthTrading: {
       month: currentMonthPrefix,
       buyCount: buyTrades.length,
       sellCount: sellTrades.length,
-      buyList: buyTrades.map(t => ({ name: t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
-      sellList: sellTrades.map(t => ({ name: t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
+      buyList: buyTrades.map(t => ({ name: t.assetName || t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
+      sellList: sellTrades.map(t => ({ name: t.assetName || t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
       totalBuyValue: buyTrades.reduce((s, t) => s + ((t.quantity || 0) * (t.price || 0)), 0),
       totalSellValue: sellTrades.reduce((s, t) => s + ((t.quantity || 0) * (t.price || 0)), 0),
       totalFee: currentMonthTrades.reduce((s, t) => s + (parseFloat(t.feeThbRecord || t.fee) || 0), 0),
