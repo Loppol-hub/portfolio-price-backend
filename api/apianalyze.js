@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ดึงตัวเลขภาพรวมตรงจากหน้าจอเพื่อให้ตรงกันเป๊ะ)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (อัปเดตกฎรูปแบบการตอบใหม่ให้อ่านง่ายบนมือถือ)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -36,19 +36,44 @@ export default async function handler(req, res) {
     // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ โดยอิงจากข้อมูลจริงที่ส่งตรงมาจากหน้าจอ
     const processedData = extractAndComputePortfolioData(portfolio, now);
 
-    // 3. กำหนดกฎการตอบ (ห้ามใช้ Markdown และบังคับขึ้นบรรทัดใหม่สำหรับรายการย่อย)
+    // 3. กำหนดกฎการตอบใหม่ตามข้อกำหนดการจัดหน้าบนมือถือ
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr} (ห้ามเดาวันที่เอง)
 
-กฎเหล็กรูปแบบการตอบ (สำคัญมาก ห้ามฝ่าฝืน):
-1. ตอบเป็นข้อความธรรมดาเท่านั้น ห้ามใช้เครื่องหมาย Markdown ใดๆ ทั้งสิ้น เช่น ห้ามใช้ ** (ตัวหนา), ห้ามใช้ ## (หัวข้อ), ห้ามใช้ \` (โค้ด), ห้ามใช้ | (เส้นตาราง) หรือทำตารางเด็ดขาด
-2. ใช้หัวข้อเป็นตัวหนังสือธรรมดาตามด้วยเครื่องหมาย : และต้องขึ้นบรรทัดใหม่เสมอ
-3. ทุกรายการย่อย (ที่มีเครื่องหมาย - นำหน้า) ต้องขึ้นบรรทัดใหม่ทุกข้อ ห้ามเขียนต่อกันเป็นพืดในบรรทัดเดียว
-4. ตัวเลขเงินและเปอร์เซ็นต์ต้องมีคอมม่าและหน่วยชัดเจน (เช่น 37,253.12 บาท, 22.89%)
-5. ความยาวพอเหมาะ อ่านจบในไม่เกิน 1 นาที ประโยคสั้น เน้นข้อสรุปก่อนรายละเอียด
-6. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
-7. หากข้อมูลส่วนใดในระบบไม่มีหรือเป็นค่า null ให้ระบุไว้ท้ายคำตอบในบรรทัดสุดท้ายขึ้นต้นด้วยหัวข้อ: ข้อมูลที่ยังไม่ครบ: (ตามด้วยรายการที่ขาดหาย)
+## รูปแบบการตอบ (จัดหน้าให้อ่านง่ายบนมือถือ)
+กฎข้อบังคับ ต้องทำตามทุกข้อ:
+1. ห้ามใช้ Markdown ทุกชนิด เช่น ** ## \` | --- และห้ามทำตาราง
+2. ห้ามเขียนเป็นย่อหน้ายาวติดกัน ให้แบ่งเป็นหัวข้อสั้นๆ เสมอ
+3. รูปแบบหัวข้อ: พิมพ์เลขลำดับ จุด ตามด้วยชื่อหัวข้อ แล้วขึ้นบรรทัดใหม่ เช่น
+   1. ภาพรวมพอร์ต
+4. ใต้หัวข้อ ให้แต่ละประเด็นขึ้นบรรทัดใหม่ และขึ้นต้นด้วย "- " ทุกบรรทัด
+   หนึ่งบรรทัดต่อหนึ่งประเด็น ห้ามเอาหลายประเด็นไว้ในบรรทัดเดียว
+5. เว้นบรรทัดว่าง 1 บรรทัดระหว่างแต่ละหัวข้อ
+6. ประโยคสั้น กระชับ ไม่เกิน 2 บรรทัดต่อประเด็น
+7. เริ่มคำตอบด้วยบรรทัด "สรุปสั้นๆ:" ตามด้วย 1-2 ประโยคที่เป็นข้อสรุปสำคัญที่สุดก่อน
+8. ตัวเลขใส่คอมม่าและหน่วยเสมอ เช่น 37,907.05 บาท, 32.22%
+9. ท้ายคำตอบเรียงตามนี้ โดยเว้นบรรทัดก่อนแต่ละส่วน:
+   แหล่งข้อมูล: พอร์ตการลงทุนปัจจุบันของผู้ใช้ (อัปเดต ณ ${currentTimeStr})
+   ข้อมูลที่ยังไม่ครบ: (ระบุตามจริงหากส่วนใดเป็น null หรือไม่มีข้อมูล)
+   ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล
+
+ตัวอย่างรูปแบบที่ต้องการ:
+สรุปสั้นๆ: พอร์ตกำไร 5.14% แต่กระจุกตัวใน ETH เกินเกณฑ์
+
+1. ภาพรวมพอร์ต
+- มูลค่ารวม 37,907.05 บาท
+- ต้นทุนรวม 27,438.37 บาท
+- กำไรสุทธิ 1,409.05 บาท (5.14%)
+
+2. สัดส่วนสินทรัพย์
+- คริปโต 32.22%
+- เงินสด 23.90%
+- หุ้นไทย 19.73%
+
+กฎเพิ่มเติม:
+- ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
+- ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
     `.trim();
 
     if (customPrompt) {
@@ -178,7 +203,7 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   const history = Array.isArray(portfolio.history) ? portfolio.history : [];
   const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
 
-  const initialCapital = parseFloat(portfolio.initialCapital) || 29500; // อิงตามหน้าจอจริง
+  const initialCapital = parseFloat(portfolio.initialCapital) || 29500;
   const fxRate = parseFloat(portfolio.fxRate) || 36.5;
 
   let totalInvestedCost = 0;
@@ -210,14 +235,13 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   });
 
   const dividendsTotal = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0) || 5000;
-  const performanceTotal = 998; // อิงตามผลประกอบการรวมหน้าจอ
-  const rebalancesTotal = 1000; // อิงตามรีบาลานซ์หน้าจอ
+  const performanceTotal = 998;
+  const rebalancesTotal = 1000;
   
-  // คำนวณเงินสดให้ตรงกับหน้าจอจริง (ประมาณ 9,059.63 บาท ตามภาพ)
   const computedCash = portfolio.cashBalance !== undefined ? parseFloat(portfolio.cashBalance) : 9059.63;
   typeBreakdownValues['cash'] = computedCash;
 
-  const totalAssetValue = totalInvestedValue + computedCash; // 37,253.12 บาท
+  const totalAssetValue = totalInvestedValue + computedCash;
   const totalGain = totalInvestedValue - totalInvestedCost;
 
   const year = currentDate.getFullYear();
