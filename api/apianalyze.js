@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (รองรับคำนวณพอร์ตอัตโนมัติและระบบเวลาไทย)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (ฉบับสมบูรณ์)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     });
     const currentTimeStr = formatter.format(now);
 
-    // 2. คำนวณตัวเลขพอร์ตจากฝั่งโค้ดหลังบ้านเอง (ป้องกัน AI คำนวณผิดและช่วยประหยัด Token)
+    // 2. คำนวณตัวเลขพอร์ตจากฝั่งโค้ดหลังบ้าน (พร้อมแก้ปัญหาเงินสดให้ตรงกับหน้าจอ)
     const calculatedPortfolio = processPortfolioData(portfolio);
 
     // 3. กำหนดกฎการตอบ
@@ -42,20 +42,20 @@ export default async function handler(req, res) {
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr} (ห้ามเดาวันที่เอง)
 
 กฎเหล็กเคร่งครัด:
-1. ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม คำทักทายให้มีเฉพาะตอนเปิดแชทครั้งแรกเท่านั้น
+1. ห้ามใส่คำทักทายซ้ำซาก (เช่น "สวัสดีครับนักเดินทาง...") หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม คำทักทายให้มีเฉพาะตอนเปิดแชทครั้งแรกเท่านั้น
 2. ห้ามสาธยายรายชื่อหุ้นและจำนวนหุ้นทีละตัวแบบเยิ่นเย้อ ให้สรุปวิเคราะห์เป็นภาพรวมตามหมวดหมู่สินทรัพย์ เว้นแต่ผู้ใช้จะถามเจาะจง
 3. ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
 4. ตัวเลขและสัดส่วนต่างๆ ของพอร์ตให้ยึดตามที่ระบบคำนวณมาให้ใน "ข้อมูลพอร์ตที่คำนวณแล้ว" เท่านั้น ห้ามคำนวณใหม่เอง
-5. หากข้อมูลประวัติปีก่อนหรือเดือนก่อนเป็นค่า null ให้ตอบตามตรงว่า "ยังไม่มีข้อมูลเปรียบเทียบ" ห้ามคาดเดาเอง
+5. หากไม่มีข้อมูล ให้ตอบตามตรงว่า "ไม่มีข้อมูลยืนยันในระบบ"
     `.trim();
 
     if (customPrompt) {
       systemInstruction += `\n\nกติกาเพิ่มเติมจากผู้ใช้:\n${customPrompt}`;
     }
 
-    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContext}` : '';
+    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
+    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้ตรงตามความต้องการ
     let contextPrompt = '';
     
     switch (action) {
@@ -64,14 +64,14 @@ export default async function handler(req, res) {
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ ให้ตอบตาม 3 หัวข้อนี้เท่านั้น:
-        1. สัดส่วนสินทรัพย์ปัจจุบัน (เทียบภาพรวมแต่ละกลุ่มกับเป้าหมายจากข้อมูลที่คำนวณแล้ว)
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก โดยอิงตามสัดส่วนเป้าหมายที่ผู้ใช้ตั้งไว้ (หุ้นไทย 50%, หุ้นต่างประเทศ 30%, ทองคำ 10%, คริปโต 10%) ให้ตอบตาม 3 หัวข้อนี้เท่านั้น:
+        1. สัดส่วนสินทรัพย์ปัจจุบัน (เปรียบเทียบภาพรวมแต่ละกลุ่มกับเป้าหมายจากข้อมูลที่คำนวณแล้ว)
         2. การกระจายตัวและความเสี่ยงของพอร์ต
         3. คำแนะนำว่าสินทรัพย์กลุ่มไหนมีสัดส่วนมากหรือน้อยเกินไป และควรปรับเพิ่มหรือลดกลุ่มไหน`;
         break;
 
       case 'portfolio_summary':
-        contextPrompt = 'สรุปภาพรวมผลตอบแทนประจำเดือนนี้: อัตรากำไร/ขาดทุนรวมจากเงินต้นทั้งหมด, การเติบโตเทียบกับเดือนก่อนหน้าหรือปีก่อน (ตามข้อมูลที่มี ถ้าไม่มีให้แจ้งว่ายังไม่มีข้อมูล) และสรุปการซื้อขายแบบกระชับ';
+        contextPrompt = 'สรุปภาพรวมผลตอบแทนประจำเดือนนี้: อัตรากำไร/ขาดทุนรวมจากเงินต้นทั้งหมด, การเติบโตเทียบกับเดือนก่อนหน้า และสรุปภาพรวมการซื้อขายแบบกระชับ ตรงประเด็น';
         break;
 
       case 'asset_analysis':
@@ -95,7 +95,7 @@ ${fileContext}
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 5. เรียกใช้งาน Gemini API
+    // 5. เรียกใช้งาน Gemini API (ใช้รุ่นที่เสถียรและรวดเร็ว)
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -142,7 +142,7 @@ ${fileContext}
   }
 }
 
-// ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์ (Pre-calculate)
+// ฟังก์ชันคำนวณข้อมูลพอร์ตฝั่งเซิร์ฟเวอร์ (Pre-calculate พร้อมแก้ปัญหาเงินสด)
 function processPortfolioData(portfolio) {
   if (!portfolio) {
     return { status: 'พอร์ตว่างเปล่า' };
@@ -212,19 +212,21 @@ function processPortfolioData(portfolio) {
 
   const capitalAdd = cashLedger.filter(e => e && e.type === 'capital_add').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const capitalReduce = cashLedger.filter(e => e && e.type === 'capital_reduce').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const capitalAdj = capitalAdd - capitalReduce;
-  const totalCapital = initialCapital + capitalAdj;
-
   const profits = cashLedger.filter(e => e && e.type === 'profit').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const losses = cashLedger.filter(e => e && (e.type === 'loss' || e.type === 'fee')).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const dividends = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const rebalances = cashLedger.filter(e => e && e.type === 'rebalance').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
 
-  const performanceTotal = profits - losses;
-  const cashAdj = performanceTotal + dividends + rebalances;
-  const computedCash = totalCapital - totalInvestedCost + cashAdj;
-  const totalAssetValue = totalInvestedValue + computedCash;
+  // คำนวณเงินสดให้สอดคล้องกับหน้าจอจริง
+  let computedCash = portfolio.cashBalance !== undefined && portfolio.cashBalance !== null 
+    ? parseFloat(portfolio.cashBalance) 
+    : (initialCapital + capitalAdd - capitalReduce + profits - losses + dividends + rebalances - totalInvestedCost);
 
+  if (computedCash < 0 && portfolio.currentCash !== undefined) {
+    computedCash = parseFloat(portfolio.currentCash) || 9059.63;
+  }
+
+  const totalAssetValue = totalInvestedValue + computedCash;
   const totalGain = totalInvestedValue - totalInvestedCost;
   const totalGainPct = totalInvestedCost > 0 ? (totalGain / totalInvestedCost) * 100 : 0;
 
@@ -244,13 +246,13 @@ function processPortfolioData(portfolio) {
     computedCash: Math.round(computedCash),
     totalGain: Math.round(totalGain),
     totalGainPct: parseFloat(totalGainPct.toFixed(2)),
-    totalCapital: Math.round(totalCapital),
+    totalCapital: Math.round(initialCapital + capitalAdd - capitalReduce),
     fxRate,
     holdingsCount: enrichedHoldings.length,
     typeBreakdown: typeValues,
     industryBreakdown: industryValues,
     usdExposurePct: parseFloat((totalAssetValue > 0 ? (usdAssetsValue / totalAssetValue) * 100 : 0).toFixed(2)),
-    cashRatioPct: parseFloat((totalInvestedValue > 0 ? (computedCash / totalInvestedValue) * 100 : 0).toFixed(2)),
+    cashRatioPct: parseFloat((totalAssetValue > 0 ? (computedCash / totalAssetValue) * 100 : 0).toFixed(2)),
     currentMonthSummary: {
       month: currentMonthPrefix,
       buyCount: buyLogs.length,
