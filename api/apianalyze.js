@@ -193,8 +193,8 @@ ${fileContextStr}
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 5. เรียกใช้งาน Gemini API (ใช้ gemini-1.5-flash)
-    const modelName = 'gemini-1.5-flash';
+    // 5. เรียกใช้งาน Gemini API (ใช้ gemini-3.5-flash-lite)
+    const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
