@@ -222,93 +222,35 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   const tradeLogs = Array.isArray(portfolio.tradeLogs) ? portfolio.tradeLogs : [];
   const cashLedger = Array.isArray(portfolio.cashLedger) ? portfolio.cashLedger : [];
   const scraped = portfolio.uiScrapedSummary || {};
+  const breakdown = scraped.breakdown || {};
 
-  const initialCapital = 100000; // ทุนเริ่มต้นตามหน้าจอ
-  let totalInvestedCost = 0;
-  let totalInvestedValue = 0;
+  const initialCapital = 100000; // ทุนเริ่มต้น
   
-  const typeBreakdownValues = { th_stock: 0, foreign_stock: 0, fund: 0, gold: 0, crypto: 0, cash: 0, other: 0 };
+  const typeBreakdownValues = {
+    th_stock: breakdown.th_stock || 0,
+    foreign_stock: breakdown.foreign_stock || 0,
+    fund: breakdown.fund || 0,
+    gold: breakdown.gold || 0,
+    crypto: breakdown.crypto || 0,
+    cash: breakdown.cashBalance || 0,
+    other: 0
+  };
 
-  holdings.forEach(h => {
-    if (!h) return;
-    const qty = parseFloat(h.quantity) || 0;
-    const avg = parseFloat(h.avgCost) || 0;
-    const price = parseFloat(h.currentPrice !== undefined ? h.currentPrice : (h.price !== undefined ? h.price : 0));
-    const currency = h.currency === 'USD' ? 'USD' : 'THB';
-    const isDr = h.instrumentType === 'dr';
-    const effRate = (currency === 'USD' && !isDr) ? 36.5 : 1;
-    const fixedRate = (currency === 'USD' && !isDr) ? (parseFloat(h.createdFxRate) || 36.5) : 1;
-    
-    const costVal = h.totalCostThb !== undefined && h.totalCostThb !== null ? parseFloat(h.totalCostThb) : (qty * avg * fixedRate);
-    const mVal = qty * price * effRate;
-
-    if (h.type !== 'cash') {
-      totalInvestedCost += costVal;
-      totalInvestedValue += mVal;
-    }
-
-    let tKey = h.type || 'other';
-    if (tKey === 'th_stock' && isDr) tKey = 'foreign_stock';
-    if (typeBreakdownValues[tKey] !== undefined) {
-      typeBreakdownValues[tKey] += mVal;
-    }
-  });
-
-  // ใช้ค่าที่ดึงตรงจากการ์ดหน้าจอ หากมีค่า
-  if (scraped.goldValue && scraped.goldValue > 0) {
-    typeBreakdownValues['gold'] = scraped.goldValue;
-  }
-  if (scraped.foreignStockValue && scraped.foreignStockValue > 0) {
-    typeBreakdownValues['foreign_stock'] = scraped.foreignStockValue;
-  }
-
-  const computedCash = scraped.cashBalance !== undefined && scraped.cashBalance > 0 ? scraped.cashBalance : 39907.99;
-  typeBreakdownValues['cash'] = computedCash;
-
-  const totalAssetValue = scraped.totalAssetValue && scraped.totalAssetValue > 0 
-    ? scraped.totalAssetValue 
-    : (totalInvestedValue + computedCash);
-
+  const totalAssetValue = scraped.totalAssetValue || Object.values(typeBreakdownValues).reduce((a, b) => a + b, 0);
   const totalGain = totalAssetValue - initialCapital;
   const returnRate = (totalGain / initialCapital) * 100;
 
-  const year = currentDate.getFullYear();
-  const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-  const currentMonthPrefix = `${year}-${month}`;
-
-  const currentMonthTrades = tradeLogs.filter(l => l && l.date && typeof l.date === 'string' && l.date.startsWith(currentMonthPrefix));
-  const buyTrades = currentMonthTrades.filter(l => l && l.action === 'buy');
-  const sellTrades = currentMonthTrades.filter(l => l && l.action === 'sell');
-
-  const realizedPnLPerAsset = {};
-  sellTrades.forEach(l => {
-    const ticker = l.ticker || l.assetName || 'Unknown';
-    const pnl = parseFloat(l.pnlThb || l.pnl || 0);
-    realizedPnLPerAsset[ticker] = (realizedPnLPerAsset[ticker] || 0) + pnl;
-  });
-
   return {
     rawPortfolioSummary: {
-      cash: computedCash,
+      cash: typeBreakdownValues.cash,
       initialCapital: initialCapital,
-      investedAmount: totalInvestedCost,
+      investedAmount: totalAssetValue - typeBreakdownValues.cash,
       totalGain: totalGain,
       returnRate: returnRate,
       totalAssetValue: totalAssetValue,
       totalAssetValueFormatted: totalAssetValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " บาท"
     },
     assetTypeBreakdown: typeBreakdownValues,
-    currentMonthTrading: {
-      month: currentMonthPrefix,
-      buyCount: buyTrades.length,
-      sellCount: sellTrades.length,
-      buyList: buyTrades.map(t => ({ name: t.assetName || t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
-      sellList: sellTrades.map(t => ({ name: t.assetName || t.name, ticker: t.ticker, qty: t.quantity, price: t.price, date: t.date })),
-      totalBuyValue: buyTrades.reduce((s, t) => s + ((t.quantity || 0) * (t.price || 0)), 0),
-      totalSellValue: sellTrades.reduce((s, t) => s + ((t.quantity || 0) * (t.price || 0)), 0),
-      totalFee: currentMonthTrades.reduce((s, t) => s + (parseFloat(t.feeThbRecord || t.fee) || 0), 0),
-      realizedPnLPerAsset: realizedPnLPerAsset
-    },
     holdings: holdings.map(h => ({
       name: h?.name || '',
       ticker: h?.ticker || '',
@@ -322,3 +264,4 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
     }))
   };
 }
+
