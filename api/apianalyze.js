@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     });
     const currentTimeStr = formatter.format(now);
 
-    // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ โดยอิงจากข้อมูลจริงที่ส่งตรงมาจากหน้าจอ
+    // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ จากพอร์ตจริงโดยไม่มีการฟิกซ์ค่า
     const processedData = extractAndComputePortfolioData(portfolio, now);
 
     // 3. กำหนดกฎการตอบตามข้อกำหนดการจัดหน้าบนมือถือ
@@ -67,7 +67,6 @@ export default async function handler(req, res) {
       systemInstruction += `\n\nกติกาเพิ่มเติมจากผู้ใช้:\n${customPrompt}`;
     }
 
-    // แก้ไขชื่อตัวแปรไม่ให้ชนกัน เพื่อป้องกัน ReferenceError
     let fileContextStr = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
     // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
@@ -213,7 +212,7 @@ ${fileContextStr}
   }
 }
 
-// ฟังก์ชันดึงข้อมูลพอร์ตโดยยึดค่าจริงจากหน้าจอ เพื่อป้องกันตัวเลขเพี้ยน
+// ฟังก์ชันดึงข้อมูลพอร์ตแบบ Dynamic จากข้อมูลจริงของผู้ใช้โดยไม่มีค่าฟิกซ์
 function extractAndComputePortfolioData(portfolio, currentDate) {
   if (!portfolio) {
     return { status: 'พอร์ตว่างเปล่า' };
@@ -225,19 +224,19 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
   const history = Array.isArray(portfolio.history) ? portfolio.history : [];
   const yearlyHistory = Array.isArray(portfolio.yearlyHistory) ? portfolio.yearlyHistory : [];
 
-  const initialCapital = parseFloat(portfolio.initialCapital) || 29500;
-  const fxRate = parseFloat(portfolio.fxRate) || 36.5;
+  const initialCapital = parseFloat(portfolio.initialCapital || portfolio.initialInvestment || portfolio.capital || 0);
+  const fxRate = parseFloat(portfolio.fxRate || 36.5);
 
   let totalInvestedCost = 0;
   let totalInvestedValue = 0;
   
-  const typeBreakdownValues = { th_stock: 0, foreign_stock: 0, fund: 0, gold: 0, crypto: 0, other: 0 };
+  const typeBreakdownValues = { th_stock: 0, foreign_stock: 0, fund: 0, gold: 0, crypto: 0, cash: 0, other: 0 };
 
   holdings.forEach(h => {
-    if (!h || h.type === 'cash') return;
+    if (!h) return;
     const qty = parseFloat(h.quantity) || 0;
     const avg = parseFloat(h.avgCost) || 0;
-    const price = parseFloat(h.currentPrice) || 0;
+    const price = parseFloat(h.currentPrice !== undefined ? h.currentPrice : (h.price !== undefined ? h.price : 0));
     const currency = h.currency === 'USD' ? 'USD' : 'THB';
     const isDr = h.instrumentType === 'dr';
     const effRate = (currency === 'USD' && !isDr) ? fxRate : 1;
@@ -246,21 +245,30 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
     const costVal = h.totalCostThb !== undefined && h.totalCostThb !== null ? parseFloat(h.totalCostThb) : (qty * avg * fixedRate);
     const mVal = qty * price * effRate;
 
-    totalInvestedCost += costVal;
-    totalInvestedValue += mVal;
+    if (h.type !== 'cash') {
+      totalInvestedCost += costVal;
+      totalInvestedValue += mVal;
+    }
 
-    let tKey = h.type;
+    let tKey = h.type || 'other';
     if (tKey === 'th_stock' && isDr) tKey = 'foreign_stock';
     if (typeBreakdownValues[tKey] !== undefined) {
       typeBreakdownValues[tKey] += mVal;
+    } else {
+      typeBreakdownValues['other'] = (typeBreakdownValues['other'] || 0) + mVal;
     }
   });
 
-  const dividendsTotal = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0) || 5000;
-  const performanceTotal = 998;
-  const rebalancesTotal = 1000;
+  const dividendsTotal = cashLedger.filter(e => e && e.type === 'dividend').reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   
-  const computedCash = portfolio.cashBalance !== undefined ? parseFloat(portfolio.cashBalance) : 9059.63;
+  let computedCash = 0;
+  if (portfolio.cashBalance !== undefined && portfolio.cashBalance !== null) {
+    computedCash = parseFloat(portfolio.cashBalance) || 0;
+  } else if (portfolio.cash !== undefined && portfolio.cash !== null) {
+    computedCash = parseFloat(portfolio.cash) || 0;
+  } else {
+    computedCash = cashLedger.reduce((s, e) => s + (parseFloat(e.amount || e.netAmount || 0) * (e.type === 'deposit' || e.type === 'dividend' ? 1 : e.type === 'withdraw' ? -1 : 0)), 0);
+  }
   typeBreakdownValues['cash'] = computedCash;
 
   const totalAssetValue = totalInvestedValue + computedCash;
@@ -288,10 +296,8 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
       investedAmount: totalInvestedCost,
       totalGain: totalGain,
       dividend: dividendsTotal,
-      performanceTotal: performanceTotal,
-      rebalance: rebalancesTotal,
       totalAssetValue: totalAssetValue,
-      totalAssetValueFormatted: "37,253.12 บาท"
+      totalAssetValueFormatted: totalAssetValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " บาท"
     },
     assetTypeBreakdown: typeBreakdownValues,
     currentMonthTrading: {
@@ -313,7 +319,7 @@ function extractAndComputePortfolioData(portfolio, currentDate) {
       industry: h?.industry || 'อื่นๆ',
       quantity: h?.quantity || 0,
       avgCost: h?.avgCost || 0,
-      currentPrice: h?.currentPrice || 0,
+      currentPrice: h?.currentPrice || h?.price || 0,
       totalCostThb: h?.totalCostThb || 0
     })),
     history: history.length > 0 ? history.slice(-3) : null,
