@@ -38,7 +38,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 1. ดึงวันที่และเวลาปัจจุบัน เขตเวลา Asia/Bangkok (ใช้ปี ค.ศ. ตามแอพหลัก)
+    // 1. ดึงวันที่และเวลาปัจจุบัน เขตเวลา Asia/Bangkok
     const now = new Date();
     const formatter = new Intl.DateTimeFormat('th-TH-u-ca-gregory', {
       timeZone: 'Asia/Bangkok',
@@ -119,20 +119,26 @@ export default async function handler(req, res) {
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr}
 
-## กฎเหล็กข้อบังคับ:
-1. ตัวเลขทุกตัวในคำตอบต้องคัดลอกจากข้อมูล JSON (Pre-calculated Summary และ Snapshot) ที่ให้มาเท่านั้น! ห้ามคำนวณใหม่ ห้ามปัดเศษเอง ห้ามยกตัวอย่างตัวเลขเด็ดขาด
-2. รูปแบบตัวเลขต้องใช้ตามที่กำหนด เช่น X,XXX.XX บาท หรือ XX.XX% เท่านั้น
-3. ถ้าไม่มีข้อมูลในฟิลด์นั้น ให้เขียนว่า 'ไม่มีข้อมูล' ห้ามแต่งข้อมูลขึ้นมาเอง
-4. ห้ามกล่าวถึงสินทรัพย์หรืออุตสาหกรรมที่ไม่อยู่ในรายการ holdings ของพอร์ต
-5. ห้ามใช้ Markdown ทุกชนิด เช่น ** ## \` | --- และห้ามทำตาราง
-6. ห้ามเขียนเป็นย่อหน้ายาวติดกัน ให้แบ่งเป็นหัวข้อสั้นๆ เสมอ
-7. หัวข้อพิมพ์เลขลำดับ จุด ตามด้วยชื่อหัวข้อ แล้วขึ้นบรรทัดใหม่
-8. ใต้หัวข้อ ให้แต่ละประเด็นขึ้นบรรทัดใหม่ และขึ้นต้นด้วย "- " ทุกบรรทัด หนึ่งบรรทัดต่อหนึ่งประเด็น
-9. เริ่มคำตอบด้วยบรรทัด "สรุปสั้นๆ:" ตามด้วย 1-2 ประโยคที่เป็นข้อสรุปสำคัญที่สุด
-10. ท้ายคำตอบเรียงตามนี้โดยเว้นบรรทัด:
+## รูปแบบการตอบ (จัดหน้าให้อ่านง่ายบนมือถือ)
+กฎข้อบังคับ ต้องทำตามทุกข้อ:
+1. ห้ามใช้ Markdown ทุกชนิด เช่น ** ## \` | --- และห้ามทำตาราง
+2. ห้ามเขียนเป็นย่อหน้ายาวติดกัน ให้แบ่งเป็นหัวข้อสั้นๆ เสมอ
+3. รูปแบบหัวข้อ: พิมพ์เลขลำดับ จุด ตามด้วยชื่อหัวข้อ แล้วขึ้นบรรทัดใหม่ เช่น
+   1. ภาพรวมพอร์ต
+4. ใต้หัวข้อ ให้แต่ละประเด็นขึ้นบรรทัดใหม่ และขึ้นต้นด้วย "- " ทุกบรรทัด
+   หนึ่งบรรทัดต่อหนึ่งประเด็น ห้ามเอาหลายประเด็นไว้ในบรรทัดเดียว
+5. เว้นบรรทัดว่าง 1 บรรทัดระหว่างแต่ละหัวข้อ
+6. ประโยคสั้น กระชับ ไม่เกิน 2 บรรทัดต่อประเด็น
+7. เริ่มคำตอบด้วยบรรทัด "สรุปสั้นๆ:" ตามด้วย 1-2 ประโยคที่เป็นข้อสรุปสำคัญที่สุดก่อน
+8. ตัวเลขใส่คอมม่าและหน่วยเสมอ ห้ามปัดเศษเอง คัดลอกตามข้อมูลที่ให้มา
+9. ท้ายคำตอบเรียงตามนี้ โดยเว้นบรรทัดก่อนแต่ละส่วน:
    แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr}
    ข้อมูลที่ยังไม่ครบ: ไม่มี
    ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล
+
+กฎเพิ่มเติม:
+- ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
+- ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
     `.trim();
 
     if (customPrompt) {
@@ -141,7 +147,7 @@ export default async function handler(req, res) {
 
     let fileContextStr = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
+    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม (คืนค่า Prompt เต็มครบถ้วน)
     let contextPrompt = '';
     
     switch (action) {
@@ -150,33 +156,51 @@ export default async function handler(req, res) {
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึกตามข้อมูล Pre-calculated และ Snapshot ที่ให้มา:
+        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก ให้ตอบตามหัวข้อด้วยข้อความธรรมดาและขึ้นบรรทัดใหม่ทุกรายการย่อย:
 1. ภาพรวมพอร์ต: มูลค่ารวม ${preCalculatedSummary.totalAssetValueText}, ต้นทุน ${snapshot.totalInvestedCost?.toLocaleString('en-US', {minimumFractionDigits:2})} บาท, กำไร ${preCalculatedSummary.unrealizedGainText} (${preCalculatedSummary.unrealizedGainPctText})
-2. สัดส่วนสินทรัพย์: แจกแจงมูลค่าและเปอร์เซ็นต์ของแต่ละประเภทจาก byType ให้ครบถ้วน
+2. สัดส่วนสินทรัพย์: แจกแจงมูลค่าและเปอร์เซ็นต์ของแต่ละประเภทจาก byType ให้ครบถ้วน พร้อมระบุประเภทที่มากที่สุด
 3. ความกระจุกตัว: 
-- เทียบเป้าหมาย: หุ้นไทย ${targetComparisons[0].actual.toFixed(2)}% (${targetComparisons[0].status}), หุ้นนอก ${targetComparisons[1].actual.toFixed(2)}% (${targetComparisons[1].status}), ทองคำ ${targetComparisons[2].actual.toFixed(2)}% (${targetComparisons[2].status}), คริปโต ${targetComparisons[3].actual.toFixed(2)}% (${targetComparisons[3].status})
-- สินทรัพย์รายตัวที่เกิน 20%: ${preCalculatedSummary.over20Names.length > 0 ? preCalculatedSummary.over20Names.join(', ') : 'ไม่มี'}
-- 3 อันดับแรก (${preCalculatedSummary.top3Assets.join(', ')} รวมกัน ${preCalculatedSummary.top3PctSumText})
-4. ความเสี่ยงหลัก: สรุปความเสี่ยงจากสัดส่วนและสินทรัพย์ในพอร์ตจริง
-5. ข้อพิจารณาปรับพอร์ต: แนะนำแนวทางปรับพอร์ตสั้นๆ ตามข้อมูลจริง`;
+- สัดส่วนเป้าหมายที่ตั้งไว้ (หุ้นไทย 50%, หุ้นนอกรวม DR 30%, ทองคำ 10%, คริปโต 10%) หากกลุ่มไหนเกินหรือต่ำกว่าให้แจ้งเตือน (หุ้นไทย: ${targetComparisons[0].actual.toFixed(2)}% [${targetComparisons[0].status}], หุ้นนอก: ${targetComparisons[1].actual.toFixed(2)}% [${targetComparisons[1].status}], ทองคำ: ${targetComparisons[2].actual.toFixed(2)}% [${targetComparisons[2].status}], คริปโต: ${targetComparisons[3].actual.toFixed(2)}% [${targetComparisons[3].status}])
+- สินทรัพย์รายตัวที่มีสัดส่วนเกิน 20% ของพอร์ต: ${preCalculatedSummary.over20Names.length > 0 ? preCalculatedSummary.over20Names.join(', ') : 'ไม่มี'}
+- 3 อันดับแรก (${preCalculatedSummary.top3Assets.join(', ')}) รวมกัน ${preCalculatedSummary.top3PctSumText}
+4. ความเสี่ยงหลัก: จัดลำดับ 3 ข้อ แต่ละข้อมีเหตุผลสั้นๆ (ความเสี่ยงตลาด, สภาพคล่อง, ความผันผวน, ค่าเงิน, ค่าธรรมเนียม)
+5. จุดแข็งของพอร์ต: 1-2 ข้อ
+6. ข้อพิจารณาปรับพอร์ต: 1-3 ข้อ เรียงตามความสำคัญ แต่ละข้อบอกเหตุผลและสิ่งที่ควรระวัง`;
         break;
 
       case 'portfolio_summary':
-        contextPrompt = `สรุปผลตอบแทนประจำเดือนนี้จากข้อมูล Pre-calculated:
-1. ช่วงเวลา: เดือนปัจจุบัน
-2. การซื้อขาย: ซื้อ ${preCalculatedSummary.currentMonthTradeSummary.buyCount} รายการ (${preCalculatedSummary.currentMonthTradeSummary.totalBuyValText}), ขาย ${preCalculatedSummary.currentMonthTradeSummary.sellCount} รายการ (${preCalculatedSummary.currentMonthTradeSummary.totalSellValText}), ค่าธรรมเนียมรวม ${preCalculatedSummary.currentMonthTradeSummary.totalFeeThbText}
-3. กำไร/ขาดทุนเดือนนี้: ${preCalculatedSummary.currentMonthTradeSummary.totalPnlThbText}`;
+        contextPrompt = `สรุปผลตอบแทนประจำเดือนนี้ โดยอิงจากข้อมูลที่คำนวณมาให้:
+1. ช่วงเวลา: เดือนและปีปัจจุบัน
+2. การซื้อขายในเดือนนี้:
+- จำนวนรายการซื้อ (${preCalculatedSummary.currentMonthTradeSummary.buyCount} รายการ, มูลค่ารวม ${preCalculatedSummary.currentMonthTradeSummary.totalBuyValText}) / จำนวนรายการขาย (${preCalculatedSummary.currentMonthTradeSummary.sellCount} รายการ, มูลค่ารวม ${preCalculatedSummary.currentMonthTradeSummary.totalSellValText})
+- ค่าธรรมเนียมรวม ${preCalculatedSummary.currentMonthTradeSummary.totalFeeThbText}
+3. กำไร/ขาดทุนเดือนนี้: ${preCalculatedSummary.currentMonthTradeSummary.totalPnlThbText}
+4. ข้อสังเกตสั้นๆ 2-3 ข้อ`;
         break;
 
       case 'asset_analysis':
-        const targetAsset = assetContext ? holdings.find(h => h.name.toLowerCase().includes((assetContext.name || '').toLowerCase())) : null;
-        contextPrompt = `วิเคราะห์สินทรัพย์ ${userMessage} จากพอร์ตจริง:
-1. ข้อมูลในพอร์ต: ${targetAsset ? `จำนวน ${targetAsset.qty}, ต้นทุนเฉลี่ย ${targetAsset.avg}, ราคาปัจจุบัน ${targetAsset.price}, มูลค่า ${targetAsset.marketValue} บาท (${targetAsset.pctOfTotal?.toFixed(2)}% ของพอร์ต)` : 'ไม่มีข้อมูลรายตัวในพอร์ต'}
-2. มุมมองและข้อพิจารณา: วิเคราะห์แนวโน้มและคำแนะนำตามสัดส่วนที่มีอยู่จริง`;
+        const targetAsset = assetContext ? holdings.find(h => h.name.toLowerCase().includes((assetContext.name || '').toLowerCase()) || (h.ticker && h.ticker.toLowerCase().includes((assetContext.ticker || '').toLowerCase()))) : null;
+        contextPrompt = `วิเคราะห์สินทรัพย์ ${userMessage} (เป้าหมาย: ${assetContext?.name || userMessage}) จากข้อมูลในพอร์ตและปัจจัยพื้นฐาน ให้ตอบตามหัวข้อ:
+1. ข้อมูลของคุณในพอร์ต: ${targetAsset ? `จำนวน ${targetAsset.qty}, ต้นทุนเฉลี่ย ${targetAsset.avg}, ราคาปัจจุบัน ${targetAsset.price}, มูลค่า ${targetAsset.marketValue.toLocaleString('en-US', {minimumFractionDigits:2})} บาท (${targetAsset.pctOfTotal?.toFixed(2)}% ของพอร์ต), กำไร/ขาดทุน ${targetAsset.gain >= 0 ? '+' : ''}${targetAsset.gain.toLocaleString('en-US', {minimumFractionDigits:2})} บาท (${targetAsset.gainPct?.toFixed(2)}%)` : 'ไม่มีข้อมูลรายตัวนี้ในพอร์ต'}
+2. ภาพรวมธุรกิจหรือลักษณะสินทรัพย์: ทำอะไร หรือมีลักษณะสำคัญอย่างไร (1-2 ประโยค)
+3. ปัจจัยพื้นฐานและแนวโน้มราคา: แนวโน้มระยะสั้น/กลาง แนวรับ แนวต้านสำคัญ หรือปัจจัยขับเคลื่อนราคา
+4. ข่าวและปัจจัยล่าสุดที่กระทบ (ผลประกอบการ ผลลัพธ์ทางเศรษฐกิจ หรือข่าวสารตลาด)
+5. ความเสี่ยงหลัก 3 ข้อ
+6. ข้อพิจารณาสำหรับพอร์ตของผู้ใช้: ถือต่อ/ทยอยเพิ่ม/ทยอยลด พร้อมเหตุผล โดยดูต้นทุนเฉลี่ยของผู้ใช้และสัดส่วนในพอร์ตประกอบ`;
         break;
 
       case 'news_analysis':
-        contextPrompt = `วิเคราะห์ผลกระทบของข่าว (${userMessage}) ต่อสินทรัพย์จริงในพอร์ต (${holdings.map(h => h.name).join(', ')}) และสัดส่วนเงินสด (${preCalculatedSummary.cashRatioText})`;
+        if (newsTopic === 'geopolitics' || (userMessage && (userMessage.includes('ภูมิรัฐศาสตร์') || userMessage.includes('โลก')))) {
+          contextPrompt = `วิเคราะห์สถานการณ์ภูมิรัฐศาสตร์ที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
+1. ภาพรวมสถานการณ์โลก: ประเด็นหลัก 3-5 เรื่องที่สำคัญที่สุดในปัจจุบัน
+2. ผลต่อพอร์ตของผู้ใช้: โยงแต่ละประเด็นกับสินทรัพย์จริงในพอร์ต (${holdings.map(h => h.name).join(', ')}) ว่าได้ประโยชน์หรือเสี่ยงอย่างไร ระดับผลกระทบ สูง/กลาง/ต่ำ
+3. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวัง และการป้องกันความเสี่ยงที่ทำได้ เช่น ถือเงินสด ทอง กระจายภูมิภาค`;
+        } else {
+          contextPrompt = `วิเคราะห์เศรษฐกิจโลก-ไทยที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
+1. ภาพรวมเศรษฐกิจหลัก (สหรัฐฯ, จีน, ไทย) และทิศทางดอกเบี้ย/เงินเฟ้อ
+2. ผลต่อพอร์ตของผู้ใช้: โยงกับสินทรัพย์ในพอร์ตตามประเภท (หุ้นไทย หุ้นนอก ทอง คริปโต เงินสด) ระบุว่ากลุ่มไหนได้ประโยชน์หรือเสี่ยง และเกี่ยวกับสัดส่วนสกุลเงิน USD ที่ถืออยู่อย่างไร
+3. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวังและการปรับพอร์ตที่ควรพิจารณา พร้อมเหตุผล`;
+        }
         break;
 
       case 'chat':
