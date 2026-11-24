@@ -1,55 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (รองรับ Finnhub API Integration)
-
-// ฟังก์ชันช่วยดึงข้อมูลราคาและข่าวจาก Finnhub API แบบเฉพาะกิจ
-async function fetchFinnhubData(ticker, finnhubKey) {
-  if (!ticker || !finnhubKey) return null;
-  try {
-    const cleanTicker = ticker.trim().toUpperCase();
-    
-    // 1. ดึงข้อมูลราคาปัจจุบัน (Quote)
-    const quoteRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(cleanTicker)}&token=${finnhubKey}`);
-    const quoteData = await quoteRes.json();
-    
-    // 2. ดึงข่าวสารย้อนหลัง 7 วันล่าสุด
-    const toDate = new Date().toISOString().split('T')[0];
-    const fromDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const newsRes = await fetch(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(cleanTicker)}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`);
-    const newsData = await newsRes.json();
-    
-    let newsList = [];
-    if (Array.isArray(newsData)) {
-      newsList = newsData.slice(0, 3).map(n => {
-        const dateStr = n.datetime ? new Date(n.datetime * 1000).toISOString().split('T')[0] : 'ไม่ระบุวันที่';
-        return `- [${dateStr}] ${n.headline} (แหล่งข่าว: ${n.source || 'Finnhub'})`;
-      });
-    }
-
-    return {
-      quote: {
-        current: quoteData.c, // ราคาปัจจุบัน
-        change: quoteData.d,  // ส่วนต่างราคา
-        percentChange: quoteData.dp, // เปอร์เซ็นต์เปลี่ยนแปล
-        high: quoteData.h,
-        low: quoteData.l,
-        open: quoteData.o,
-        previousClose: quoteData.pc
-      },
-      news: newsList
-    };
-  } catch (err) {
-    console.error(`Finnhub API Error for ${ticker}:`, err);
-    return null;
-  }
-}
-
-// ฟังก์ชันตรวจหา Ticker จากข้อความแชททั่วไป (เช่น หุ้น AAPL, PTT)
-function detectTickerFromMessage(message) {
-  if (!message) return null;
-  // ค้นหารูปแบบตัวอักษรภาษาอังกฤษพิมพ์ใหญ่ 2-5 ตัวที่ตามหลังคำว่าหุ้น หรือตัวย่อสากล
-  const match = message.match(/\b([A-Z]{2,5})\b/);
-  return match ? match[1] : null;
-}
-
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -66,10 +15,8 @@ export default async function handler(req, res) {
   try {
     const { action, portfolio, userMessage, customPrompt, fileContent, assetContext, newsTopic } = req.body;
 
-    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-    const finnhubApiKey = process.env.FINNHUB_API_KEY;
-
-    if (!geminiApiKey) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    if (!apiKey) {
       return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
 
@@ -151,46 +98,7 @@ export default async function handler(req, res) {
       }
     };
 
-    // 3. จัดการดึงข้อมูลจาก Finnhub ตาม Action ที่ผู้ใช้เลือก
-    let externalMarketDataText = "";
-
-    if (action === 'asset_analysis' && assetContext) {
-      // แนวทางดึงข้อมูลสินทรัพย์รายตัว (Workflow 1)
-      const targetTicker = assetContext.ticker || assetContext.name;
-      if (targetTicker && finnhubApiKey) {
-        const finnhubResult = await fetchFinnhubData(targetTicker, finnhubApiKey);
-        if (finnhubResult) {
-          externalMarketDataText = `\n[ข้อมูลสดจาก Finnhub API สำหรับ ${targetTicker}]:\n- ราคาตลาดปัจจุบัน: ${finnhubResult.quote.current} (เปลี่ยนแปลง: ${finnhubResult.quote.change} หรือ ${finnhubResult.quote.percentChange}%)\n- ราคาสูงสุด/ต่ำสุดวันนี้: ${finnhubResult.quote.high} / ${finnhubResult.quote.l}\n- ข่าวล่าสุด:\n${finnhubResult.news.join('\n')}\n`;
-        }
-      }
-    } else if (action === 'news_analysis' && newsTopic !== 'geopolitics') {
-      // แนวทางการดึงข่าวสารพอร์ต (Workflow 2: ดึงเฉพาะบริษัทในพอร์ต + กรองข่าวสำคัญ)
-      if (finnhubApiKey && holdings.length > 0) {
-        // เลือกหุ้น 3 อันดับแรกที่มีมูลค่าสูงสุดในพอร์ตมาดึงข่าวเพื่อประหยัดโควต้า
-        const topHoldingsForNews = sortedHoldings.filter(h => h.ticker).slice(0, 3);
-        let aggregatedNews = [];
-        for (const h of topHoldingsForNews) {
-          const res = await fetchFinnhubData(h.ticker, finnhubApiKey);
-          if (res && res.news.length > 0) {
-            aggregatedNews.push(`ข่าวของ ${h.name} (${h.ticker}):\n` + res.news.join('\n'));
-          }
-        }
-        if (aggregatedNews.length > 0) {
-          externalMarketDataText = `\n[ข้อมูลข่าวสารล่าสุดของสินทรัพย์ในพอร์ตจาก Finnhub]:\n${aggregatedNews.join('\n\n')}\n`;
-        }
-      }
-    } else if (action === 'chat' && userMessage) {
-      // แนวทางการดึงข้อมูลจากแชททั่วไป (Workflow 3: ตรวจจับคำค้นหา/Ticker และยิง API เฉพาะกิจ)
-      const detectedTicker = detectTickerFromMessage(userMessage);
-      if (detectedTicker && finnhubApiKey) {
-        const finnhubResult = await fetchFinnhubData(detectedTicker, finnhubApiKey);
-        if (finnhubResult && finnhubResult.quote.current) {
-          externalMarketDataText = `\n[ข้อมูลเฉพาะกิจจาก Finnhub สำหรับ Ticker: ${detectedTicker}]:\n- ราคาปัจจุบัน: ${finnhubResult.quote.current} (เปลี่ยน ${finnhubResult.quote.percentChange}%)\n- ข่าวที่เกี่ยวข้อง:\n${finnhubResult.news.join('\n')}\n`;
-        }
-      }
-    }
-
-    // 4. กำหนดกฎการตอบตามข้อกำหนดการจัดหน้าบนมือถือ
+    // 3. กำหนดกฎการตอบตามข้อกำหนดการจัดหน้าบนมือถือ
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr}
@@ -208,7 +116,7 @@ export default async function handler(req, res) {
 7. เริ่มคำตอบด้วยบรรทัด "สรุปสั้นๆ:" ตามด้วย 1-2 ประโยคที่เป็นข้อสรุปสำคัญที่สุดก่อน
 8. ตัวเลขใส่คอมม่าและหน่วยเสมอ ห้ามปัดเศษเอง คัดลอกตามข้อมูลที่ให้มา
 9. ท้ายคำตอบเรียงตามนี้ โดยเว้นบรรทัดก่อนแต่ละส่วน:
-   แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr} ${finnhubApiKey ? 'และ Finnhub API' : ''}
+   แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr}
    ข้อมูลที่ยังไม่ครบ: ไม่มี
    ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล
 
@@ -223,7 +131,7 @@ export default async function handler(req, res) {
 
     let fileContextStr = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 5. Prompt ตามที่ผู้ใช้กำหนดสำหรับแต่ละปุ่ม
+    // 4. Prompt ตามที่ผู้ใช้กำหนดสำหรับแต่ละปุ่ม (ไม่มีการค้นหาออนไลน์)
     let contextPrompt = '';
     
     switch (action) {
@@ -287,10 +195,13 @@ export default async function handler(req, res) {
 5. ความเสี่ยงเฉพาะ: ความผันผวนสูง
 6. ข้อพิจารณา: ควรกำหนดสัดส่วนคริปโตไม่ให้เกินความเสี่ยงที่รับได้ และเตือนตรงๆ ว่าคริปโตเป็นสินทรัพย์เสี่ยงสูง ห้ามชี้นำให้ใช้เงินกู้หรือเลเวอเรจ`;
         } else {
-          contextPrompt = `วิเคราะห์สินทรัพย์ ${assetName} จากข้อมูลในพอร์ตและข้อมูลตลาดสด:
+          contextPrompt = `วิเคราะห์สินทรัพย์ ${assetName} จากข้อมูลในพอร์ตและปัจจัยพื้นฐาน:
 1. ข้อมูลของคุณในพอร์ต: จำนวน ต้นทุนเฉลี่ย ราคาปัจจุบัน กำไร/ขาดทุน (บาท/%) สัดส่วนในพอร์ต
 2. ภาพรวมธุรกิจ: ทำอะไร รายได้หลักมาจากไหน (1-2 ประโยค)
-3. ข้อมูลราคาและข่าวสารตลาดล่าสุดที่ดึงมาได้
+3. พื้นฐานและสุขภาพการเงิน (จากข้อมูลที่มี):
+   - รายได้ กำไรสุทธิ
+   - อัตรากำไร, ROE (ถ้ามี)
+   - หนี้สิน (D/E) และสภาพคล่อง
 4. แนวโน้มราคา: แนวโน้มระยะสั้น/กลาง แนวรับ แนวต้านสำคัญ
 5. ความเสี่ยงหลัก 3 ข้อ
 6. ข้อพิจารณาสำหรับพอร์ตของผู้ใช้: ถือต่อ/ทยอยเพิ่ม/ทยอยลด พร้อมเหตุผล โดยดูต้นทุนเฉลี่ยของผู้ใช้และสัดส่วนในพอร์ตประกอบ
@@ -311,31 +222,35 @@ export default async function handler(req, res) {
 8. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวัง และการป้องกันความเสี่ยงที่ทำได้ เช่น ถือเงินสด ทอง กระจายภูมิภาค
 (หลีกเลี่ยงการแสดงความเห็นทางการเมืองส่วนตัว รายงานเฉพาะข้อเท็จจริงและผลต่อการลงทุน)`;
         } else {
-          contextPrompt = `วิเคราะห์เศรษฐกิจและข่าวสารล่าสุดที่กระทบพอร์ตของผู้ใช้ โดยอิงข้อมูลข่าวจาก Finnhub ที่เตรียมไว้ให้ ตอบตามหัวข้อ:
-1. สภาพตลาดและข่าวสารสำคัญล่าสุดที่ตรวจพบ
-2. ผลต่อพอร์ตของผู้ใช้: โยงกับสินทรัพย์ในพอร์ตตามประเภท ระบุว่ากลุ่มไหนได้ประโยชน์หรือเสี่ยง
-3. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวังและการปรับพอร์ตที่ควรพิจารณา พร้อมเหตุผล`;
+          contextPrompt = `วิเคราะห์เศรษฐกิจที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
+1. สหรัฐอเมริกา: GDP, เงินเฟ้อ, การจ้างงาน, ดอกเบี้ย Fed
+2. จีน: GDP, PMI, ภาคอสังหาริมทรัพย์, มาตรการกระตุ้น
+3. เวียดนาม: GDP, การส่งออก, FDI
+4. ไทย: GDP, เงินเฟ้อ, ดอกเบี้ยนโยบาย (กนง.), การส่งออก, ท่องเที่ยว, หนี้ครัวเรือน, ค่าเงินบาท, SET
+5. ตัวแปรร่วมที่กระทบทุกตลาด: ราคาน้ำมัน ดัชนีดอลลาร์ ทองคำ
+6. ผลต่อพอร์ตของผู้ใช้: โยงกับสินทรัพย์ในพอร์ตตามประเภท ระบุว่ากลุ่มไหนได้ประโยชน์หรือเสี่ยง และเกี่ยวกับสัดส่วนสกุลเงิน USD ที่ถืออยู่อย่างไร
+7. ปฏิทินเหตุการณ์สำคัญที่จะมาถึง
+8. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวังและการปรับพอร์ตที่ควรพิจารณา พร้อมเหตุผล`;
         }
         break;
 
       case 'chat':
       default:
-        contextPrompt = userMessage || 'ตอบคำถามของผู้ใช้ให้ตรงประเด็นโดยใช้ข้อมูลพอร์ตที่คำนวณแล้วและข้อมูลตลาดเฉพาะกิจ (ถ้ามี)';
+        contextPrompt = userMessage || 'ตอบคำถามของผู้ใช้ให้ตรงประเด็นโดยใช้ข้อมูลพอร์ตที่คำนวณแล้ว ถ้าผู้ใช้แนบไฟล์/รูป ให้อ่านและอ้างอิงเนื้อหานั้น';
         break;
     }
 
     const fullUserPrompt = `
 ข้อมูล Pre-calculated Summary ของพอร์ต: ${JSON.stringify(preCalculatedSummary)}
 ข้อมูล Snapshot ดิบ: ${JSON.stringify(snapshot)}
-${externalMarketDataText}
 ${fileContextStr}
 
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 6. เรียกใช้งาน Gemini API (ใช้ gemini-3.5-flash-lite)
+    // 5. เรียกใช้งาน Gemini API (ใช้โมเดล gemini-3.5-flash-lite แบบไม่มี Tools ค้นหาออนไลน์)
     const modelName = 'gemini-3.5-flash-lite';
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
