@@ -52,27 +52,12 @@ export default async function handler(req, res) {
     const currentTimeStr = formatter.format(now);
     const snapshotDateStr = snapshot.snapshotAt ? formatter.format(new Date(snapshot.snapshotAt)) : currentTimeStr;
 
-    // 2. คำนวณล่วงหน้าใน Backend (Pre-calculation ห้ามให้โมเดลคำนวณเอง)
+    // 2. คำนวณล่วงหน้าใน Backend (Pre-calculation)
     const holdings = Array.isArray(snapshot.holdings) ? snapshot.holdings : [];
     
-    // สัดส่วนเป้าหมายเทียบจริง
     const actualMap = {};
     byTypeArr.forEach(t => { actualMap[t.key] = t.pctOfTotal || 0; });
     
-    const foreignActual = (actualMap['foreign_stock'] || 0);
-    const targetComparisons = [
-      { cat: 'หุ้นไทย', target: 50, actual: actualMap['th_stock'] || 0 },
-      { cat: 'หุ้นนอกรวม DR', target: 30, actual: foreignActual },
-      { cat: 'ทองคำ', target: 10, actual: actualMap['gold'] || 0 },
-      { cat: 'คริปโต', target: 10, actual: actualMap['crypto'] || 0 }
-    ].map(item => {
-      const dev = item.actual - item.target;
-      let status = 'ใกล้เคียง (±2%)';
-      if (dev > 2) status = 'เกิน';
-      else if (dev < -2) status = 'ต่ำกว่า';
-      return { ...item, deviation: dev, status };
-    });
-
     const sortedHoldings = [...holdings].sort((a, b) => (b.marketValue || 0) - (a.marketValue || 0));
     const top3 = sortedHoldings.slice(0, 3);
     const top3PctSum = top3.reduce((s, h) => s + (h.pctOfTotal || 0), 0);
@@ -100,7 +85,6 @@ export default async function handler(req, res) {
       unrealizedGainPctText: (snapshot.unrealizedGainPct >= 0 ? "+" : "") + (snapshot.unrealizedGainPct || 0).toFixed(2) + "%",
       cashText: (snapshot.cash || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " บาท",
       cashRatioText: (snapshot.cashRatioPct || 0).toFixed(2) + "%",
-      targetComparisons,
       top3Assets: top3.map(h => `${h.name} (${(h.pctOfTotal || 0).toFixed(2)}%)`),
       top3PctSumText: top3PctSum.toFixed(2) + "%",
       over20Names: over20.map(h => h.name),
@@ -132,7 +116,7 @@ export default async function handler(req, res) {
 7. เริ่มคำตอบด้วยบรรทัด "สรุปสั้นๆ:" ตามด้วย 1-2 ประโยคที่เป็นข้อสรุปสำคัญที่สุดก่อน
 8. ตัวเลขใส่คอมม่าและหน่วยเสมอ ห้ามปัดเศษเอง คัดลอกตามข้อมูลที่ให้มา
 9. ท้ายคำตอบเรียงตามนี้ โดยเว้นบรรทัดก่อนแต่ละส่วน:
-   แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr}
+   แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr} และข้อมูลตลาดล่าสุด
    ข้อมูลที่ยังไม่ครบ: ไม่มี
    ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล
 
@@ -147,7 +131,7 @@ export default async function handler(req, res) {
 
     let fileContextStr = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม (คืนค่า Prompt เต็มครบถ้วน)
+    // 4. Prompt ใหม่ล่าสุดตามที่ผู้ใช้กำหนดสำหรับแต่ละปุ่ม
     let contextPrompt = '';
     
     switch (action) {
@@ -156,56 +140,112 @@ export default async function handler(req, res) {
         break;
 
       case 'deep_analysis':
-        contextPrompt = `วิเคราะห์พอร์ตการลงทุนเชิงลึก ให้ตอบตามหัวข้อด้วยข้อความธรรมดาและขึ้นบรรทัดใหม่ทุกรายการย่อย:
-1. ภาพรวมพอร์ต: มูลค่ารวม ${preCalculatedSummary.totalAssetValueText}, ต้นทุน ${snapshot.totalInvestedCost?.toLocaleString('en-US', {minimumFractionDigits:2})} บาท, กำไร ${preCalculatedSummary.unrealizedGainText} (${preCalculatedSummary.unrealizedGainPctText})
-2. สัดส่วนสินทรัพย์: แจกแจงมูลค่าและเปอร์เซ็นต์ของแต่ละประเภทจาก byType ให้ครบถ้วน พร้อมระบุประเภทที่มากที่สุด
-3. ความกระจุกตัว: 
-- สัดส่วนเป้าหมายที่ตั้งไว้ (หุ้นไทย 50%, หุ้นนอกรวม DR 30%, ทองคำ 10%, คริปโต 10%) หากกลุ่มไหนเกินหรือต่ำกว่าให้แจ้งเตือน (หุ้นไทย: ${targetComparisons[0].actual.toFixed(2)}% [${targetComparisons[0].status}], หุ้นนอก: ${targetComparisons[1].actual.toFixed(2)}% [${targetComparisons[1].status}], ทองคำ: ${targetComparisons[2].actual.toFixed(2)}% [${targetComparisons[2].status}], คริปโต: ${targetComparisons[3].actual.toFixed(2)}% [${targetComparisons[3].status}])
-- สินทรัพย์รายตัวที่มีสัดส่วนเกิน 20% ของพอร์ต: ${preCalculatedSummary.over20Names.length > 0 ? preCalculatedSummary.over20Names.join(', ') : 'ไม่มี'}
-- 3 อันดับแรก (${preCalculatedSummary.top3Assets.join(', ')}) รวมกัน ${preCalculatedSummary.top3PctSumText}
-4. ความเสี่ยงหลัก: จัดลำดับ 3 ข้อ แต่ละข้อมีเหตุผลสั้นๆ (ความเสี่ยงตลาด, สภาพคล่อง, ความผันผวน, ค่าเงิน, ค่าธรรมเนียม)
+        contextPrompt = `วิเคราะห์พอร์ตเชิงลึกจาก "ข้อมูลพอร์ตที่คำนวณแล้ว" และค้นข้อมูลปัจจุบันที่เกี่ยวข้อง
+ตอบตามหัวข้อนี้ตามลำดับ:
+1. ภาพรวมพอร์ต: มูลค่ารวม ${preCalculatedSummary.totalAssetValueText}, ต้นทุน ${snapshot.totalInvestedCost?.toLocaleString('en-US', {minimumFractionDigits:2})} บาท, กำไร/ขาดทุน ${preCalculatedSummary.unrealizedGainText} (${preCalculatedSummary.unrealizedGainPctText}) ณ วันที่ปัจจุบัน
+2. สัดส่วนสินทรัพย์: แยกตามประเภท (หุ้นไทย/หุ้นนอก/กองทุน/ทอง/คริปโต/เงินสด) พร้อมบอกว่าประเภทไหนมากสุด
+3. ความกระจุกตัว:
+   - สินทรัพย์รายตัวที่มีสัดส่วนเกิน 20% ของพอร์ต (ถ้ามี) ระบุชื่อและ % (${preCalculatedSummary.over20Names.length > 0 ? preCalculatedSummary.over20Names.join(', ') : 'ไม่มี'})
+   - กลุ่มอุตสาหกรรมที่กระจุกตัว (จากฟิลด์ industry)
+   - ถ้ามีหุ้นต่างประเทศหรือ DR หลายตัวในธีมเดียวกัน (เช่น เทคโนโลยีสหรัฐฯ) ให้ชี้ว่าซ้อนทับกัน
+4. ความเสี่ยงหลัก: จัดลำดับ 3 ข้อ แต่ละข้อมีเหตุผลสั้นๆ (ความเสี่ยงตลาด, สภาพคล่อง/เงินสดต่ำหรือสูงเกินไป, ความผันผวนของคริปโต/ทอง, ค่าเงิน, ค่าธรรมเนียม)
 5. จุดแข็งของพอร์ต: 1-2 ข้อ
-6. ข้อพิจารณาปรับพอร์ต: 1-3 ข้อ เรียงตามความสำคัญ แต่ละข้อบอกเหตุผลและสิ่งที่ควรระวัง`;
+6. ข้อพิจารณาปรับพอร์ต: 1-3 ข้อ เรียงตามความสำคัญ แต่ละข้อบอกเหตุผลและสิ่งที่ควรระวัง 
+7. บริบทตลาดปัจจุบันที่เกี่ยวกับพอร์ตนี้: ค้นข่าวเศรษฐกิจ/ตลาดล่าสุด 1-2 เรื่องที่กระทบสินทรัพย์ในพอร์ตจริง ระบุวันที่
+(ห้ามเสนอสินทรัพย์ใหม่เป็นคำสั่งซื้อ เสนอได้เฉพาะ "ประเภท/ธีม" ที่ช่วยกระจายความเสี่ยง)`;
         break;
 
       case 'portfolio_summary':
-        contextPrompt = `สรุปผลตอบแทนประจำเดือนนี้ โดยอิงจากข้อมูลที่คำนวณมาให้:
-1. ช่วงเวลา: เดือนและปีปัจจุบัน
+        contextPrompt = `สรุปผลงานพอร์ตของเดือนปัจจุบัน ใช้เฉพาะ "ข้อมูลพอร์ตที่คำนวณแล้ว" ไม่ต้องค้นเว็บ
+ตอบตามหัวข้อนี้:
+1. ช่วงเวลา: ระบุเดือนและปี (${currentMonthPrefix})
 2. การซื้อขายในเดือนนี้:
-- จำนวนรายการซื้อ (${preCalculatedSummary.currentMonthTradeSummary.buyCount} รายการ, มูลค่ารวม ${preCalculatedSummary.currentMonthTradeSummary.totalBuyValText}) / จำนวนรายการขาย (${preCalculatedSummary.currentMonthTradeSummary.sellCount} รายการ, มูลค่ารวม ${preCalculatedSummary.currentMonthTradeSummary.totalSellValText})
-- ค่าธรรมเนียมรวม ${preCalculatedSummary.currentMonthTradeSummary.totalFeeThbText}
-3. กำไร/ขาดทุนเดือนนี้: ${preCalculatedSummary.currentMonthTradeSummary.totalPnlThbText}
-4. ข้อสังเกตสั้นๆ 2-3 ข้อ`;
+   - จำนวนรายการซื้อ (${preCalculatedSummary.currentMonthTradeSummary.buyCount} รายการ) / จำนวนรายการขาย (${preCalculatedSummary.currentMonthTradeSummary.sellCount} รายการ)
+   - รายชื่อสินทรัพย์ที่ซื้อ (ชื่อ จำนวน ราคา วันที่) และที่ขาย
+   - มูลค่าเงินซื้อรวม (${preCalculatedSummary.currentMonthTradeSummary.totalBuyValText}) / มูลค่าเงินขายรวม (${preCalculatedSummary.currentMonthTradeSummary.totalSellValText})
+   - ค่าธรรมเนียมรวม (${preCalculatedSummary.currentMonthTradeSummary.totalFeeThbText})
+3. กำไร/ขาดทุนเดือนนี้:
+   - กำไร/ขาดทุนที่รับรู้จากการขาย (บาท) แยกรายตัว
+   - ปันผลที่ได้รับ (ถ้ามี)
+   - กำไร/ขาดทุนที่ยังไม่รับรู้ของพอร์ต ณ วันนี้ (${preCalculatedSummary.unrealizedGainText} / ${preCalculatedSummary.unrealizedGainPctText})
+4. การเติบโตของพอร์ต:
+   - เทียบสิ้นเดือนก่อน (ถ้ามีข้อมูลใน history)
+   - เทียบช่วงเดียวกันของปีที่แล้ว หรือสิ้นปีที่แล้ว (จาก yearlyHistory) เป็น %
+   - ต้องแยกให้ชัดเจนว่าการโตมาจากเงินทุนที่เติมเข้ามา (capital_add) หรือจากผลตอบแทนจริง
+5. ถ้าไม่มีข้อมูลเดือนก่อน/ปีก่อน ให้บอกว่า "ยังไม่มีข้อมูลเปรียบเทียบ" ห้ามประมาณเอง
+6. ข้อสังเกตสั้นๆ 2-3 ข้อ (เช่น ซื้อบ่อยเกินไปไหม ค่าธรรมเนียมสูงเมื่อเทียบกำไรไหม)`;
         break;
 
       case 'asset_analysis':
-        const targetAsset = assetContext ? holdings.find(h => h.name.toLowerCase().includes((assetContext.name || '').toLowerCase()) || (h.ticker && h.ticker.toLowerCase().includes((assetContext.ticker || '').toLowerCase()))) : null;
-        contextPrompt = `วิเคราะห์สินทรัพย์ ${userMessage} (เป้าหมาย: ${assetContext?.name || userMessage}) จากข้อมูลในพอร์ตและปัจจัยพื้นฐาน ให้ตอบตามหัวข้อ:
-1. ข้อมูลของคุณในพอร์ต: ${targetAsset ? `จำนวน ${targetAsset.qty}, ต้นทุนเฉลี่ย ${targetAsset.avg}, ราคาปัจจุบัน ${targetAsset.price}, มูลค่า ${targetAsset.marketValue.toLocaleString('en-US', {minimumFractionDigits:2})} บาท (${targetAsset.pctOfTotal?.toFixed(2)}% ของพอร์ต), กำไร/ขาดทุน ${targetAsset.gain >= 0 ? '+' : ''}${targetAsset.gain.toLocaleString('en-US', {minimumFractionDigits:2})} บาท (${targetAsset.gainPct?.toFixed(2)}%)` : 'ไม่มีข้อมูลรายตัวนี้ในพอร์ต'}
-2. ภาพรวมธุรกิจหรือลักษณะสินทรัพย์: ทำอะไร หรือมีลักษณะสำคัญอย่างไร (1-2 ประโยค)
-3. ปัจจัยพื้นฐานและแนวโน้มราคา: แนวโน้มระยะสั้น/กลาง แนวรับ แนวต้านสำคัญ หรือปัจจัยขับเคลื่อนราคา
-4. ข่าวและปัจจัยล่าสุดที่กระทบ (ผลประกอบการ ผลลัพธ์ทางเศรษฐกิจ หรือข่าวสารตลาด)
-5. ความเสี่ยงหลัก 3 ข้อ
-6. ข้อพิจารณาสำหรับพอร์ตของผู้ใช้: ถือต่อ/ทยอยเพิ่ม/ทยอยลด พร้อมเหตุผล โดยดูต้นทุนเฉลี่ยของผู้ใช้และสัดส่วนในพอร์ตประกอบ`;
+        const assetType = assetContext?.type;
+        const assetName = assetContext?.name || userMessage;
+        
+        if (assetType === 'gold') {
+          contextPrompt = `วิเคราะห์ทิศทางราคาทองคำ ค้นข้อมูลล่าสุดแล้วตอบ:
+1. ราคาปัจจุบัน: ทองคำโลก (USD/ออนซ์) และทองคำแท่งในประเทศ (บาท/บาททอง ราคารับซื้อ-ขายออก) จากสมาคมค้าทองคำ ระบุวันและเวลาอัปเดต
+2. ปัจจัยขับเคลื่อน (อ้างข้อมูลล่าสุด): นโยบายดอกเบี้ย Fed, ดัชนีดอลลาร์ (DXY), เงินเฟ้อ, ความตึงเครียดทางภูมิรัฐศาสตร์, การซื้อทองของธนาคารกลาง, กระแสเงินเข้าออกกองทุนทองคำ, และค่าเงินบาท
+3. ทิศทางราคา: แนวโน้มระยะสั้น (1-2 สัปดาห์) และระยะกลาง (1-3 เดือน)
+4. แนวรับและแนวต้านสำคัญ (ระบุเป็นตัวเลขทั้งราคาโลกและราคาบาททองโดยประมาณ)
+5. สถานะของผู้ใช้ในพอร์ต: จำนวน ต้นทุนเฉลี่ย กำไร/ขาดทุน สัดส่วนทองในพอร์ต
+6. ข้อพิจารณา: ควรถือ ทยอยซื้อที่แนวรับ หรือทยอยขายที่แนวต้าน พร้อมความเสี่ยง (เช่น ส่วนต่างราคาซื้อ-ขาย, ผลของค่าเงิน)`;
+        } else if (assetType === 'crypto') {
+          contextPrompt = `วิเคราะห์คริปโต: ${assetName} (${assetContext?.ticker || ''}) ค้นข้อมูลล่าสุดแล้วตอบ:
+1. ราคาปัจจุบัน (USD และบาท) การเปลี่ยนแปลง 24 ชม./7 วัน/30 วัน มูลค่าตลาดและอันดับ ระบุเวลาที่ดึงข้อมูล
+2. สถานะของผู้ใช้ในพอร์ต: จำนวน ต้นทุนเฉลี่ย กำไร/ขาดทุน สัดส่วนคริปโตในพอร์ต
+3. ปัจจัยขับเคลื่อนล่าสุด: ข่าว กฎระเบียบ (ก.ล.ต. ไทย/สหรัฐฯ) การเงินไหลเข้า-ออก ETF การอัปเกรดเครือข่าย เหตุการณ์ Halving/Unlock, ภาวะตลาดโดยรวม (BTC dominance, Fear & Greed Index)
+4. ทิศทางราคา: แนวโน้มระยะสั้นและกลาง
+5. แนวรับและแนวต้านสำคัญ (ตัวเลขชัดเจน)
+6. ความเสี่ยงเฉพาะ: ความผันผวนสูง ความเสี่ยงของโครงการ ความเสี่ยงด้านกฎหมายและแพลตฟอร์ม
+7. ข้อพิจารณา: ควรกำหนดสัดส่วนคริปโตไม่ให้เกินความเสี่ยงที่รับได้ ทยอยซื้อ/ทยอยขาย และเตือนตรงๆ ว่าคริปโตเป็นสินทรัพย์เสี่ยงสูง ห้ามชี้นำให้ใช้เงินกู้หรือเลเวอเรจ`;
+        } else {
+          // หุ้นไทย, หุ้นนอก, DR
+          contextPrompt = `วิเคราะห์สินทรัพย์ ${assetName} ค้นข้อมูลล่าสุดจากแหล่งที่น่าเชื่อถือ แล้วตอบตามหัวข้อ:
+1. ข้อมูลของคุณในพอร์ต: จำนวน ต้นทุนเฉลี่ย ราคาปัจจุบัน กำไร/ขาดทุน (บาท/%) สัดส่วนในพอร์ต
+2. ภาพรวมธุรกิจ: ทำอะไร รายได้หลักมาจากไหน (1-2 ประโยค)
+3. พื้นฐานและสุขภาพการเงิน (ระบุงวดงบที่ใช้ เช่น Q1/2026 หรือ FY2025):
+   - รายได้ กำไรสุทธิ และการเติบโต YoY/QoQ
+   - อัตรากำไร, ROE
+   - หนี้สิน (D/E) และสภาพคล่อง
+   - กระแสเงินสดจากการดำเนินงาน
+   - มูลค่า: P/E, P/BV เทียบค่าเฉลี่ยกลุ่มอุตสาหกรรมหรือค่าย้อนหลังของตัวเอง
+   - ปันผล: อัตราปันผลตอบแทนและความสม่ำเสมอ (ถ้ามี)
+4. แนวโน้มราคา: แนวโน้มระยะสั้น/กลาง แนวรับ แนวต้านสำคัญ (อ้างอิงจากข้อมูลราคาและปริมาณซื้อขายล่าสุด ระบุว่าเป็นมุมมองทางเทคนิค ไม่ใช่การรับประกัน)
+5. ข่าวและปัจจัยล่าสุดใน 30 วัน ที่กระทบบริษัท พร้อมวันที่ (ผลประกอบการ ปันผล งบ การเปลี่ยนแปลงผู้บริหาร กฎระเบียบ คู่แข่ง)
+6. มุมมองนักวิเคราะห์: ราคาเป้าหมายและคำแนะนำจากสำนักวิเคราะห์ที่เชื่อถือได้ (ถ้ามี) ระบุสำนักและวันที่
+7. ความเสี่ยงหลัก 3 ข้อ
+8. ข้อพิจารณาสำหรับพอร์ตของผู้ใช้: ถือต่อ/ทยอยเพิ่ม/ทยอยลด พร้อมเหตุผล โดยดูต้นทุนเฉลี่ยของผู้ใช้และสัดส่วนในพอร์ตประกอบ
+(สำหรับ DR ให้ระบุหุ้นต้นทางด้วย)`;
+        }
         break;
 
       case 'news_analysis':
         if (newsTopic === 'geopolitics' || (userMessage && (userMessage.includes('ภูมิรัฐศาสตร์') || userMessage.includes('โลก')))) {
-          contextPrompt = `วิเคราะห์สถานการณ์ภูมิรัฐศาสตร์ที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
-1. ภาพรวมสถานการณ์โลก: ประเด็นหลัก 3-5 เรื่องที่สำคัญที่สุดในปัจจุบัน
-2. ผลต่อพอร์ตของผู้ใช้: โยงแต่ละประเด็นกับสินทรัพย์จริงในพอร์ต (${holdings.map(h => h.name).join(', ')}) ว่าได้ประโยชน์หรือเสี่ยงอย่างไร ระดับผลกระทบ สูง/กลาง/ต่ำ
-3. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวัง และการป้องกันความเสี่ยงที่ทำได้ เช่น ถือเงินสด ทอง กระจายภูมิภาค`;
+          contextPrompt = `วิเคราะห์สถานการณ์ภูมิรัฐศาสตร์ล่าสุดที่กระทบพอร์ตของผู้ใช้ ค้นข่าวใน 7-14 วันล่าสุด จากสื่อและหน่วยงานที่เชื่อถือได้ ตอบตามหัวข้อ (ทุกข่าวต้องมีวันที่):
+1. ภาพรวมสถานการณ์โลก: ประเด็นหลัก 3-5 เรื่องที่สำคัญที่สุดตอนนี้
+2. สหรัฐอเมริกา: นโยบายการค้า/ภาษี การเมืองภายใน ความสัมพันธ์ระหว่างประเทศ
+3. จีน: ความสัมพันธ์สหรัฐฯ-จีน, การควบคุมการส่งออก, ประเด็นไต้หวัน/ทะเลจีนใต้, นโยบายภายใน
+4. เวียดนาม: การค้า การลงทุนต่างชาติ ฐานการผลิตที่ย้ายมา ความสัมพันธ์กับสหรัฐฯ-จีน
+5. ไทย: การเมืองภายใน นโยบายรัฐบาล ความสัมพันธ์ประเทศเพื่อนบ้าน ประเด็นกระทบตลาดทุนและนักลงทุนต่างชาติ
+6. ความขัดแย้งและความเสี่ยงอื่นที่กระทบราคาน้ำมัน ทองคำ และห่วงโซ่อุปทาน (ถ้ามี)
+7. ผลต่อพอร์ตของผู้ใช้: โยงแต่ละประเด็นกับสินทรัพย์จริงในพอร์ต (${holdings.map(h => h.name).join(', ')}) ว่าได้ประโยชน์หรือเสี่ยงอย่างไร ระดับผลกระทบ สูง/กลาง/ต่ำ
+8. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวัง และการป้องกันความเสี่ยงที่ทำได้ เช่น ถือเงินสด ทอง กระจายภูมิภาค
+(หลีกเลี่ยงการแสดงความเห็นทางการเมืองส่วนตัว รายงานเฉพาะข้อเท็จจริงและผลต่อการลงทุน)`;
         } else {
-          contextPrompt = `วิเคราะห์เศรษฐกิจโลก-ไทยที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
-1. ภาพรวมเศรษฐกิจหลัก (สหรัฐฯ, จีน, ไทย) และทิศทางดอกเบี้ย/เงินเฟ้อ
-2. ผลต่อพอร์ตของผู้ใช้: โยงกับสินทรัพย์ในพอร์ตตามประเภท (หุ้นไทย หุ้นนอก ทอง คริปโต เงินสด) ระบุว่ากลุ่มไหนได้ประโยชน์หรือเสี่ยง และเกี่ยวกับสัดส่วนสกุลเงิน USD ที่ถืออยู่อย่างไร
-3. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวังและการปรับพอร์ตที่ควรพิจารณา พร้อมเหตุผล`;
+          contextPrompt = `วิเคราะห์เศรษฐกิจล่าสุดที่กระทบพอร์ตของผู้ใช้ ค้นข้อมูลล่าสุดจากหน่วยงานทางการและสื่อที่เชื่อถือได้ ระบุเดือน/ไตรมาสของตัวเลขและวันที่ประกาศทุกครั้ง ตอบตามหัวข้อ:
+1. สหรัฐอเมริกา: GDP, เงินเฟ้อ (CPI/PCE), การจ้างงาน, ดอกเบี้ย Fed และมุมมองทิศทางดอกเบี้ย (อ้างอิง FedWatch ถ้ามี), ตลาดพันธบัตร, ดัชนีหุ้นหลัก
+2. จีน: GDP, PMI, เงินเฟ้อ, ภาคอสังหาริมทรัพย์, มาตรการกระตุ้น, ค่าเงินหยวน
+3. เวียดนาม: GDP, การส่งออก, เงินเฟ้อ, การลงทุนโดยตรงจากต่างประเทศ (FDI), ดัชนี VN-Index
+4. ไทย: GDP (สศช.), เงินเฟ้อ, ดอกเบี้ยนโยบาย (กนง.), การส่งออก, ท่องเที่ยว, หนี้ครัวเรือน, ค่าเงินบาท, ดัชนี SET และเงินทุนต่างชาติไหลเข้า-ออก
+5. ตัวแปรร่วมที่กระทบทุกตลาด: ราคาน้ำมัน ดัชนีดอลลาร์ ทองคำ
+6. ผลต่อพอร์ตของผู้ใช้: โยงกับสินทรัพย์ในพอร์ตตามประเภท (หุ้นไทย หุ้นนอก ทอง คริปโต เงินสด) ระบุว่ากลุ่มไหนได้ประโยชน์หรือเสี่ยง และเกี่ยวกับสัดส่วนสกุลเงิน USD ที่ถืออยู่อย่างไร
+7. ปฏิทินเหตุการณ์สำคัญที่จะมาถึงใน 2 สัปดาห์ข้างหน้า (การประชุม Fed/กนง. การประกาศตัวเลข)
+8. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวังและการปรับพอร์ตที่ควรพิจารณา พร้อมเหตุผล`;
         }
         break;
 
       case 'chat':
       default:
-        contextPrompt = userMessage || 'ให้คำปรึกษาทั่วไปเกี่ยวกับการลงทุนแบบกระชับ ตรงประเด็น';
+        contextPrompt = userMessage || 'ตอบคำถามของผู้ใช้ให้ตรงประเด็นโดยใช้ข้อมูลพอร์ตที่คำนวณแล้ว ถ้าคำถามเกี่ยวกับราคา ข่าว งบ หรือตลาดปัจจุบัน ให้ค้นข้อมูลล่าสุดก่อนตอบทุกครั้ง ถ้าผู้ใช้แนบไฟล์/รูป ให้อ่านและอ้างอิงเนื้อหานั้น ถ้าคำถามไม่เกี่ยวกับการลงทุนหรือพอร์ต ให้ตอบสั้นๆ และชวนกลับมาที่การดูแลพอร์ต';
         break;
     }
 
@@ -217,12 +257,12 @@ ${fileContextStr}
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 5. เรียกใช้งาน Gemini API (ใช้ gemini-3.5-flash-lite)
+    // 5. เรียกใช้งาน Gemini API (ใช้ gemini-3.5-flash-lite พร้อมเปิด Google Search Grounding)
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     const response = await fetch(geminiUrl, {
       method: 'POST',
@@ -231,9 +271,10 @@ ${fileContextStr}
         contents: [
           { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullUserPrompt}` }] }
         ],
+        tools: [{ googleSearch: {} }],
         generationConfig: {
           temperature: 0.2,
-          maxOutputTokens: 1200,
+          maxOutputTokens: 1500,
         }
       }),
       signal: controller.signal
@@ -248,8 +289,19 @@ ${fileContextStr}
       });
     }
 
-    const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
-    return res.status(200).json({ analysis: aiReply, sources: [] });
+    const candidate = data.candidates?.[0];
+    const aiReply = candidate?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
+    
+    // ดึง Grounding Metadata (แหล่งอ้างอิงเว็บ) ถ้ามี
+    let sources = [];
+    const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
+    if (Array.isArray(groundingChunks)) {
+      sources = groundingChunks
+        .map(chunk => chunk.web ? { title: chunk.web.title, url: chunk.web.uri } : null)
+        .filter(Boolean);
+    }
+
+    return res.status(200).json({ analysis: aiReply, sources });
 
   } catch (error) {
     if (error.name === 'AbortError') {
