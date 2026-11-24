@@ -1,4 +1,4 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (อัปเดตกฎรูปแบบการตอบใหม่ให้อ่านง่ายบนมือถือ)
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     // 2. ดึงข้อมูลและคำนวณสถิติต่างๆ โดยอิงจากข้อมูลจริงที่ส่งตรงมาจากหน้าจอ
     const processedData = extractAndComputePortfolioData(portfolio, now);
 
-    // 3. กำหนดกฎการตอบใหม่ตามข้อกำหนดการจัดหน้าบนมือถือ
+    // 3. กำหนดกฎการตอบตามข้อกำหนดการจัดหน้าบนมือถือ
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
 วันที่และเวลาปัจจุบัน (Asia/Bangkok): ${currentTimeStr} (ห้ามเดาวันที่เอง)
@@ -58,19 +58,6 @@ export default async function handler(req, res) {
    ข้อมูลที่ยังไม่ครบ: (ระบุตามจริงหากส่วนใดเป็น null หรือไม่มีข้อมูล)
    ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล
 
-ตัวอย่างรูปแบบที่ต้องการ:
-สรุปสั้นๆ: พอร์ตกำไร 5.14% แต่กระจุกตัวใน ETH เกินเกณฑ์
-
-1. ภาพรวมพอร์ต
-- มูลค่ารวม 37,907.05 บาท
-- ต้นทุนรวม 27,438.37 บาท
-- กำไรสุทธิ 1,409.05 บาท (5.14%)
-
-2. สัดส่วนสินทรัพย์
-- คริปโต 32.22%
-- เงินสด 23.90%
-- หุ้นไทย 19.73%
-
 กฎเพิ่มเติม:
 - ห้ามใส่คำทักทายซ้ำซาก หรือเล่นบทบาทสมมติซ้ำซ้อนในทุกครั้งที่กดปุ่ม
 - ห้ามแต่งข้อมูล ตัวเลข หรือสร้างข่าวเท็จขึ้นมาเองเด็ดขาด (No Hallucination)
@@ -80,9 +67,9 @@ export default async function handler(req, res) {
       systemInstruction += `\n\nกติกาเพิ่มเติมจากผู้ใช้:\n${customPrompt}`;
     }
 
-    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContext}` : '';
+    let fileContext = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่มให้กระชับ
+    // 4. ปรับแต่งโครงสร้างคำสั่งของแต่ละปุ่ม
     let contextPrompt = '';
     
     switch (action) {
@@ -124,7 +111,26 @@ export default async function handler(req, res) {
         break;
 
       case 'asset_analysis':
-        contextPrompt = `วิเคราะห์สินทรัพย์ ${userMessage} เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
+        if (userMessage.includes('ทองคำ')) {
+          contextPrompt = `วิเคราะห์ทิศทางราคาทองคำ ค้นข้อมูลล่าสุดแล้วตอบ:
+1. ราคาปัจจุบัน: ทองคำโลก (USD/ออนซ์) และทองคำแท่งในประเทศ (บาท/บาททอง ราคารับซื้อ-ขายออก) จากสมาคมค้าทองคำ ระบุวันและเวลาอัปเดต
+2. ปัจจัยขับเคลื่อน (อ้างข้อมูลล่าสุด): นโยบายดอกเบี้ย Fed, ดัชนีดอลลาร์ (DXY), เงินเฟ้อ, ความตึงเครียดทางภูมิรัฐศาสตร์, การซื้อทองของธนาคารกลาง, กระแสเงินเข้าออกกองทุนทองคำ, และค่าเงินบาท
+3. ทิศทางราคา: แนวโน้มระยะสั้น (1-2 สัปดาห์) และระยะกลาง (1-3 เดือน)
+4. แนวรับและแนวต้านสำคัญ (ระบุเป็นตัวเลขทั้งราคาโลกและราคาบาททองโดยประมาณ)
+5. สถานะของผู้ใช้ในพอร์ต: จำนวน ต้นทุนเฉลี่ย กำไร/ขาดทุน สัดส่วนทองในพอร์ต
+6. ข้อพิจารณา: ควรถือ ทยอยซื้อที่แนวรับ หรือทยอยขายที่แนวต้าน พร้อมความเสี่ยง (เช่น ส่วนต่างราคาซื้อ-ขาย, ผลของค่าเงิน)`;
+        } else if (userMessage.includes('คริปโต') || userMessage.toLowerCase().includes('btc') || userMessage.toLowerCase().includes('eth')) {
+          contextPrompt = `วิเคราะห์คริปโตจากข้อความคำสั่งของ User (${userMessage}) ค้นข้อมูลล่าสุดแล้วตอบ:
+1. ราคาปัจจุบัน (USD และบาท) การเปลี่ยนแปลง 24 ชม./7 วัน/30 วัน มูลค่าตลาดและอันดับ ระบุเวลาที่ดึงข้อมูล
+2. สถานะของผู้ใช้ในพอร์ต: จำนวน ต้นทุนเฉลี่ย กำไร/ขาดทุน สัดส่วนคริปโตในพอร์ต
+3. ปัจจัยขับเคลื่อนล่าสุด: ข่าว กฎระเบียบ (ก.ล.ต. ไทย/สหรัฐฯ) การเงินไหลเข้า-ออก ETF การอัปเกรดเครือข่าย เหตุการณ์ Halving/Unlock, ภาวะตลาดโดยรวม (BTC dominance, Fear & Greed Index)
+4. ทิศทางราคา: แนวโน้มระยะสั้นและกลาง
+5. แนวรับและแนวต้านสำคัญ (ตัวเลขชัดเจน)
+6. ความเสี่ยงเฉพาะ: ความผันผวนสูง ความเสี่ยงของโครงการ ความเสี่ยงด้านกฎหมายและแพลตฟอร์ม
+7. ข้อพิจารณา: ควรกำหนดสัดส่วนคริปโตไม่ให้เกินความเสี่ยงที่รับได้ ทยอยซื้อ/ทยอยขาย และเตือนตรงๆ ว่าคริปโตเป็นสินทรัพย์เสี่ยงสูง ห้ามชี้นำให้ใช้เงินกู้หรือเลเวอเรจ`;
+        } else {
+          contextPrompt = `วิเคราะห์สินทรัพย์ ${userMessage} เน้นมุมมองแนวโน้ม กลยุทธ์ แนวรับ แนวต้าน หรือข้อมูลบริษัทแม่ (กรณี DR) แบบกระชับ`;
+        }
         break;
 
       case 'news_analysis':
@@ -144,12 +150,12 @@ ${fileContext}
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 5. เรียกใช้งาน Gemini API
+    // 5. เรียกใช้งาน Gemini API พร้อมเปิดใช้งาน Google Search Grounding
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // ขยายเวลาเผื่อค้นหาเว็บ
 
     const response = await fetch(geminiUrl, {
       method: 'POST',
@@ -158,9 +164,10 @@ ${fileContext}
         contents: [
           { role: 'user', parts: [{ text: `${systemInstruction}\n\n${fullUserPrompt}` }] }
         ],
+        tools: [{ googleSearch: {} }], // เปิดใช้งานการค้นหาข้อมูลออนไลน์ฟรีจาก Google Search
         generationConfig: {
           temperature: 0.2,
-          maxOutputTokens: 1000,
+          maxOutputTokens: 1200,
         }
       }),
       signal: controller.signal
@@ -175,13 +182,27 @@ ${fileContext}
       });
     }
 
-    const aiReply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
-    return res.status(200).json({ analysis: aiReply });
+    const candidate = data.candidates?.[0];
+    const aiReply = candidate?.content?.parts?.[0]?.text || 'สัญญาณจากฐานทัพขาดหาย ไม่ได้รับข้อมูลตอบกลับครับ';
+    
+    // ดึงแหล่งอ้างอิง (Sources) จาก Google Search Grounding ถ้ามี
+    let sources = [];
+    const groundingMetadata = candidate?.groundingMetadata;
+    if (groundingMetadata && groundingMetadata.groundingChunks) {
+      sources = groundingMetadata.groundingChunks
+        .filter(chunk => chunk.web && chunk.web.uri)
+        .map(chunk => ({
+          title: chunk.web.title || chunk.web.uri,
+          url: chunk.web.uri
+        }));
+    }
+
+    return res.status(200).json({ analysis: aiReply, sources });
 
   } catch (error) {
     if (error.name === 'AbortError') {
       return res.status(200).json({ 
-        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาตอบกลับนานเกินไป กรุณาลองใหม่อีกครั้งครับ' 
+        analysis: '⚠️ เซิร์ฟเวอร์ใช้เวลาค้นหาข้อมูลนานเกินไป กรุณาลองใหม่อีกครั้งครับ' 
       });
     }
     console.error('[API Error]:', error);
