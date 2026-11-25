@@ -1,4 +1,42 @@
-// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ
+// apianalyze.js - Backend สำหรับประมวลผล AI ผู้ช่วยนักบินอวกาศ (รองรับ Finnhub Macro News เฉพาะกิจ)
+
+// ฟังก์ชันดึงและกรองข่าวสารมหภาคจาก Finnhub API (ใช้ Endpoint /news?category=general เพื่อประหยัดโควต้า)
+async function fetchFilteredMacroNews(holdings, finnhubKey) {
+  if (!finnhubKey) return "";
+  try {
+    const res = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${finnhubKey}`);
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return "";
+
+    // รวบรวม Keyword จากพอร์ตของผู้ใช้เพื่อใช้คัดกรองข่าวที่เกี่ยวข้องจริง ๆ
+    const portfolioKeywords = ['fed', 'inflation', 'interest', 'rate', 'oil', 'gold', 'china', 'us', 'dollar', 'dxy', 'ai', 'tech', 'vietnam', 'thailand', 'tariff', 'war'];
+    holdings.forEach(h => {
+      if (h.name) portfolioKeywords.push(h.name.toLowerCase());
+      if (h.ticker) portfolioKeywords.push(h.ticker.toLowerCase());
+    });
+
+    // ระบบคัดกรอง (Backend Smart Filter): ให้คะแนนความเกี่ยวข้อง และเลือกเฉพาะข่าวที่มี Score สูงสุด 5 ข่าวแรก
+    const filteredNews = data.map(item => {
+      const text = (item.headline + " " + item.summary).toLowerCase();
+      let score = 0;
+      portfolioKeywords.forEach(kw => {
+        if (text.includes(kw)) score++;
+      });
+      return { ...item, score };
+    }).filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+
+    if (filteredNews.length === 0) return "";
+
+    return "\n\n[ข้อมูลข่าวสารมหภาคและภูมิรัฐศาสตร์ล่าสุดจาก Finnhub (ผ่านการคัดกรองความเกี่ยวข้องกับพอร์ต)]: \n" + 
+      filteredNews.map(n => `- [${new Date(n.datetime * 1000).toISOString().split('T')[0]}] ${n.headline}: ${n.summary} (แหล่งข่าว: ${n.source})`).join('\n');
+  } catch (err) {
+    console.error("Finnhub Macro News Error:", err);
+    return "";
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -16,6 +54,8 @@ export default async function handler(req, res) {
     const { action, portfolio, userMessage, customPrompt, fileContent, assetContext, newsTopic } = req.body;
 
     const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+    const finnhubApiKey = process.env.FINNHUB_API_KEY; // ดึง Finnhub API Key จาก Environment Variable
+
     if (!apiKey) {
       return res.status(200).json({ analysis: '⚠️ ระบบหลังบ้านยังไม่ได้ตั้งค่า GEMINI_API_KEY บน Vercel ครับ' });
     }
@@ -98,6 +138,12 @@ export default async function handler(req, res) {
       }
     };
 
+    // ดึงข่าวสารจาก Finnhub เฉพาะเมื่อเรียกใช้งานปุ่มภูมิรัฐศาสตร์หรือเศรษฐกิจมหภาค (action === 'news_analysis')
+    let externalMacroNewsText = "";
+    if (action === 'news_analysis' && finnhubApiKey) {
+      externalMacroNewsText = await fetchFilteredMacroNews(holdings, finnhubApiKey);
+    }
+
     // 3. กำหนดกฎการตอบตามข้อกำหนดการจัดหน้าบนมือถือ
     let systemInstruction = `
 คุณคือผู้ช่วยอัจฉริยะด้านการลงทุน โทนเสียงกระชับ เป็นมืออาชีพ ตรงประเด็น "ขอเนื้อๆ ไม่เอาน้ำ"
@@ -116,7 +162,7 @@ export default async function handler(req, res) {
 7. เริ่มคำตอบด้วยบรรทัด "สรุปสั้นๆ:" ตามด้วย 1-2 ประโยคที่เป็นข้อสรุปสำคัญที่สุดก่อน
 8. ตัวเลขใส่คอมม่าและหน่วยเสมอ ห้ามปัดเศษเอง คัดลอกตามข้อมูลที่ให้มา
 9. ท้ายคำตอบเรียงตามนี้ โดยเว้นบรรทัดก่อนแต่ละส่วน:
-   แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr}
+   แหล่งข้อมูล: พอร์ตของผู้ใช้ ณ ${snapshotDateStr} ${externalMacroNewsText ? 'และข้อมูลข่าวสารล่าสุดจาก Finnhub' : ''}
    ข้อมูลที่ยังไม่ครบ: ไม่มี
    ข้อมูลนี้เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุนส่วนบุคคล
 
@@ -131,7 +177,7 @@ export default async function handler(req, res) {
 
     let fileContextStr = fileContent ? `\n\n[ข้อมูลอ้างอิงจากไฟล์]:\n${fileContent}` : '';
 
-    // 4. Prompt ตามที่ผู้ใช้กำหนดสำหรับแต่ละปุ่ม (ไม่มีการค้นหาออนไลน์)
+    // 4. Prompt ตามที่ผู้ใช้กำหนดสำหรับแต่ละปุ่ม
     let contextPrompt = '';
     
     switch (action) {
@@ -211,7 +257,7 @@ export default async function handler(req, res) {
 
       case 'news_analysis':
         if (newsTopic === 'geopolitics' || (userMessage && (userMessage.includes('ภูมิรัฐศาสตร์') || userMessage.includes('โลก')))) {
-          contextPrompt = `วิเคราะห์สถานการณ์ภูมิรัฐศาสตร์ที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
+          contextPrompt = `วิเคราะห์สถานการณ์ภูมิรัฐศาสตร์ที่กระทบพอร์ตของผู้ใช้ (โดยใช้ข่าวกรองล่าสุดที่แนบให้) ตอบตามหัวข้อ:
 1. ภาพรวมสถานการณ์โลก: ประเด็นหลัก 3-5 เรื่องที่สำคัญที่สุด
 2. สหรัฐอเมริกา: นโยบายการค้า/ภาษี การเมืองภายใน ความสัมพันธ์ระหว่างประเทศ
 3. จีน: ความสัมพันธ์สหรัฐฯ-จีน, การควบคุมการส่งออก, ประเด็นไต้หวัน/ทะเลจีนใต้, นโยบายภายใน
@@ -222,7 +268,7 @@ export default async function handler(req, res) {
 8. ข้อพิจารณา: สิ่งที่ควรเฝ้าระวัง และการป้องกันความเสี่ยงที่ทำได้ เช่น ถือเงินสด ทอง กระจายภูมิภาค
 (หลีกเลี่ยงการแสดงความเห็นทางการเมืองส่วนตัว รายงานเฉพาะข้อเท็จจริงและผลต่อการลงทุน)`;
         } else {
-          contextPrompt = `วิเคราะห์เศรษฐกิจที่กระทบพอร์ตของผู้ใช้ ตอบตามหัวข้อ:
+          contextPrompt = `วิเคราะห์เศรษฐกิจมหภาคที่กระทบพอร์ตของผู้ใช้ (โดยใช้ข่าวกรองล่าสุดที่แนบให้) ตอบตามหัวข้อ:
 1. สหรัฐอเมริกา: GDP, เงินเฟ้อ, การจ้างงาน, ดอกเบี้ย Fed
 2. จีน: GDP, PMI, ภาคอสังหาริมทรัพย์, มาตรการกระตุ้น
 3. เวียดนาม: GDP, การส่งออก, FDI
@@ -243,12 +289,13 @@ export default async function handler(req, res) {
     const fullUserPrompt = `
 ข้อมูล Pre-calculated Summary ของพอร์ต: ${JSON.stringify(preCalculatedSummary)}
 ข้อมูล Snapshot ดิบ: ${JSON.stringify(snapshot)}
+${externalMacroNewsText}
 ${fileContextStr}
 
 คำสั่ง: ${contextPrompt}
     `.trim();
 
-    // 5. เรียกใช้งาน Gemini API (ใช้โมเดล gemini-3.5-flash-lite แบบไม่มี Tools ค้นหาออนไลน์)
+    // 5. เรียกใช้งาน Gemini API (ใช้โมเดล gemini-3.5-flash-lite)
     const modelName = 'gemini-3.5-flash-lite';
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
